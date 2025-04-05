@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neues Spiel starten</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background-color: #f4f4f4; border: 1px solid #ccc; border-radius: 8px; }
+        h1 { text-align: center; color: #333; }
+        form { background-color: #fff; padding: 25px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #555; }
+        select, input[type="number"] { width: 100%; padding: 10px; margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { padding: 12px 20px; background-color: #5cb85c; color: white; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-size: 1.1em; }
+        button:hover { background-color: #4cae4c; }
+        .flash-messages { list-style: none; padding: 0; margin-bottom: 15px; }
+        .flash-messages li { padding: 10px; margin-bottom: 10px; border-radius: 3px; }
+        .flash-success { background-color: #dff0d8; color: #3c763d; border: 1px solid #d6e9c6; }
+        .flash-error { background-color: #f2dede; color: #a94442; border: 1px solid #ebccd1; }
+        .flash-warning { background-color: #fcf8e3; color: #8a6d3b; border: 1px solid #faebcc; }
+        .flash-info { background-color: #d9edf7; color: #31708f; border: 1px solid #bce8f1; }
+        .user-info { text-align: right; margin-bottom: 15px; color: #666; }
+        .user-info a { color: #007bff; text-decoration: none; margin-left: 10px; }
+        .user-info a:hover { text-decoration: underline; }
+    </style>
+    <!-- Socket.IO Client Library -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="user-info">
+        Angemeldet als: <strong>{{ session.username }}</strong>
+        <a href="{{ url_for('logout') }}">Logout</a>
+    </div>
+
+    <h1>Neues "Mr. X"-Spiel starten</h1>
+
+    <!-- Flash Nachrichten anzeigen -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class=flash-messages>
+        {% for category, message in messages %}
+          <li class="flash-{{ category }}">{{ message }}</li>
+        {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
+    <form action="{{ url_for('start_game') }}" method="post">
+        <div>
+            <label for="mr_x">Wähle Mr. X:</label>
+            <select name="mr_x" id="mr_x" required>
+                <option value="" disabled selected>-- Bitte auswählen --</option>
+                {% for user in registered_users %}
+                    <option value="{{ user }}">{{ user }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="interval">Update-Intervall für Mr. X (Minuten):</label>
+            <input type="number" id="interval" name="interval" min="1" value="5" required>
+        </div>
+        <button type="submit">Spiel starten</button>
+    </form>
+
+<script>
+    // Optional: SocketIO auf dieser Seite, um auf Spielstart zu reagieren
+    const socket = io();
+
+    socket.on('connect', () => {
+        console.log('Verbunden mit Server auf Startseite.');
+    });
+
+    socket.on('game_started', (data) => {
+        console.log('Spiel wurde gestartet!', data);
+        // Leite den Benutzer zur Kartenseite weiter
+        window.location.href = "{{ url_for('map_page') }}";
+    });
+
+     socket.on('redirect', (data) => {
+        console.log('Redirect empfangen:', data.url);
+        window.location.href = data.url;
+    });
+
+</script>
+
+</body>
+</html>

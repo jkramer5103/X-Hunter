@@ -1,0 +1,31 @@
+/* static/style.css */
+
+/* (Styles für Login, Startseite, Flash-Nachrichten etc. beibehalten) */
+
+/* Entferne alle .profile-marker... Klassen */
+
+/* Optional: Füge die neuen Marker-Styles hier ein,
+   wenn du sie nicht im <style>-Block von map.html haben willst */
+/*
+.player-marker {
+    background-color: rgba(51, 136, 255, 0.8);
+    border: 2px solid white;
+    border-radius: 50%;
+    box-shadow: 0 0 5px rgba(0,0,0,0.5);
+    width: 15px;
+    height: 15px;
+}
+.own-player-marker {
+    background-color: rgba(0, 123, 255, 0.9);
+    border: 2px solid white;
+    width: 18px;
+    height: 18px;
+}
+.mrx-marker {
+    background-color: rgba(217, 83, 79, 0.9);
+    border: 2px solid white;
+    width: 18px;
+    height: 18px;
+    box-shadow: 0 0 8px rgba(255, 0, 0, 0.8);
+}
+*/

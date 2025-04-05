@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mr. X Jagd - {{ username }} {% if username == mr_x_username %}(Du bist Mr. X){% endif %}</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <style>
+        /* Grundlegende Layout-Styles */
+        html, body { height: 100%; margin: 0; padding: 0; font-family: sans-serif; } /* Höhe für html/body hinzufügen */
+        body { display: flex; flex-direction: column; } /* Body als Flex-Container */
+        #map-container { flex-grow: 1; position: relative; min-height: 0; } /* Wichtig für Flexbox-Kinder */
+        #map { height: 100%; width: 100%; }
+        #header { padding: 8px 15px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        #header .user-info span { margin-right: 15px; }
+        #header .user-info strong { color: #007bff; }
+        #header .game-info { font-weight: bold; }
+        #header .game-info .mrx { color: #d9534f; }
+        #header a { text-decoration: none; color: #007bff; margin-left: 10px; }
+        #mrx-actions { margin-top: 10px; text-align: center; padding: 10px; background-color: #f8d7da; border-top: 1px solid #f5c6cb; flex-shrink: 0; }
+        #mrx-actions button { padding: 8px 15px; background-color: #d9534f; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+        #mrx-actions button:hover { background-color: #c9302c; }
+        #finder-selection { margin-left: 15px; padding: 5px; border-radius: 3px; border: 1px solid #ccc; }
+
+        /* Game Over Overlay */
+        #game-over-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: none; /* Standardmäßig versteckt */
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            z-index: 1000; /* Über der Karte */
+            font-size: 1.5em;
+        }
+        #game-over-overlay h2 {
+             margin-bottom: 20px;
+        }
+        #game-over-overlay button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+        }
+
+        /* Styles für DivIcon Marker (Farbige Kreise) */
+        .player-marker {
+            background-color: rgba(51, 136, 255, 0.8); /* Blau für andere Spieler */
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+            width: 15px; /* Kleinere Kreise */
+            height: 15px;
+        }
+        .own-player-marker {
+            background-color: rgba(0, 123, 255, 0.9); /* Kräftigeres Blau für eigenen Spieler */
+            border: 2px solid white;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%; /* Sicherstellen, dass es rund ist */
+            box-shadow: 0 0 6px rgba(0, 123, 255, 0.7);
+        }
+        .mrx-marker {
+            background-color: rgba(217, 83, 79, 0.9); /* Rot für Mr. X */
+            border: 2px solid white;
+            width: 18px; /* Mr. X gleich groß wie eigener Spieler */
+            height: 18px;
+            border-radius: 50%; /* Sicherstellen, dass es rund ist */
+            box-shadow: 0 0 8px rgba(255, 0, 0, 0.8); /* Roter Schein */
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <div class="user-info">
+        <span>Angemeldet als: <strong>{{ username }}</strong></span>
+        <span class="game-info">
+            Spiel aktiv! Mr. X: <span class="mrx">{{ mr_x_username }}</span>
+            {% if username == mr_x_username %}(Du bist Mr. X){% endif %}
+        </span>
+    </div>
+    <div>
+        <a href="{{ url_for('logout') }}">Logout</a>
+    </div>
+</div>
+
+<div id="map-container">
+    <div id="map"></div>
+    <div id="game-over-overlay">
+        <div>
+            <h2 id="game-over-message">Spiel vorbei!</h2>
+            <button id="back-to-start-button">Zurück zur Startseite</button>
+        </div>
+    </div>
+</div>
+
+{% if username == mr_x_username %}
+<div id="mrx-actions">
+    <label for="finder-selection">Ich wurde gefunden von:</label>
+    <select id="finder-selection">
+        <option value="" disabled selected>-- Spieler auswählen --</option>
+        {% for player in current_players_list %}
+            <option value="{{ player }}">{{ player }}</option>
+        {% endfor %}
+    </select>
+    <button id="found-button">Gefunden melden!</button>
+</div>
+{% endif %}
+
+
+<script>
+    // --- Globale Variablen ---
+    let map;
+    let userMarkers = {}; // {username: L.marker}
+    const currentUsername = "{{ username }}";
+    const mrXUsername = "{{ mr_x_username }}";
+    let ownMarker = null;
+    let isMrX = currentUsername === mrXUsername;
+
+    // --- Initialisierung ---
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log("DOM geladen. Initialisiere Karte und SocketIO (ohne Profilbilder).");
+        initializeMap();
+        initializeSocketIO();
+        startLocationWatch();
+
+        const foundButton = document.getElementById('found-button');
+        if (foundButton) foundButton.addEventListener('click', reportFound);
+        document.getElementById('back-to-start-button').addEventListener('click', () => {
+            window.location.href = "{{ url_for('index') }}";
+        });
+    });
+
+    // --- Karteninitialisierung ---
+    function initializeMap() {
+        map = L.map('map').setView([53.5511, 9.9937], 13); // Hamburg
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+        console.log("Karte initialisiert.");
+    }
+
+    // --- Socket.IO Initialisierung & Event Handling ---
+    function initializeSocketIO() {
+        const socket = io();
+        window.socket = socket;
+
+        socket.on('connect', () => console.log('Verbunden mit WebSocket-Server (Karte).'));
+        socket.on('disconnect', (reason) => console.warn('WebSocket-Verbindung getrennt:', reason));
+        socket.on('connect_error', (err) => console.error('WebSocket Verbindungsfehler:', err));
+
+        socket.on('game_update', (data) => {
+            console.log('Spielstatus-Update erhalten:', data);
+            Object.keys(userMarkers).forEach(username => removeMarker(username));
+            if (ownMarker) { map.removeLayer(ownMarker); ownMarker = null; }
+
+            for (const username in data.locations) {
+                const locData = data.locations[username];
+                if (username === currentUsername) {
+                    updateOwnMarker(locData.lat, locData.lon);
+                } else {
+                    updateMarker(username, locData.lat, locData.lon);
+                }
+            }
+            updateFinderList(data.players || []);
+        });
+
+        socket.on('location_update', (data) => {
+            if (data.username === currentUsername) {
+                 updateOwnMarker(data.lat, data.lon);
+            } else {
+                updateMarker(data.username, data.lat, data.lon);
+            }
+        });
+
+        socket.on('player_joined', (data) => {
+            console.log(`Spieler beigetreten: ${data.username}`);
+            addPlayerToFinderList(data.username);
+            showTemporaryMessage(`${data.username} ist dem Spiel beigetreten.`, "info");
+        });
+
+        socket.on('player_left', (data) => {
+            console.log(`Spieler gegangen: ${data.username}`);
+            removeMarker(data.username);
+            removePlayerFromFinderList(data.username);
+            showTemporaryMessage(`${data.username} hat das Spiel verlassen.`, "warning");
+        });
+
+        socket.on('game_over', (data) => {
+            console.log("Spiel vorbei!", data);
+            // Diese Zeile nimmt die komplette Nachricht vom Server
+            document.getElementById('game-over-message').innerText = data.message;
+            document.getElementById('game-over-overlay').style.display = 'flex';
+            if (locationWatchId) {
+                navigator.geolocation.clearWatch(locationWatchId);
+                locationWatchId = null;
+            }
+        });
+
+
+        socket.on('redirect', (data) => {
+            console.log('Redirect empfangen:', data.url);
+            showTemporaryMessage("Kein Spiel aktiv. Leite zur Startseite weiter...", "info");
+            setTimeout(() => {
+                 window.location.href = data.url;
+            }, 2000);
+        });
+
+        socket.on('error_message', (data) => {
+             console.error("Fehler vom Server:", data.message);
+             alert(`Fehler: ${data.message}`);
+         });
+    }
+
+    // --- Geolocation ---
+    let locationWatchId = null;
+    function startLocationWatch() {
+        if (!navigator.geolocation) {
+            console.error("Geolocation wird nicht unterstützt.");
+            alert("Dein Browser unterstützt Geolocation nicht.");
+            return;
+        }
+        console.log("Starte Geolocation Watch...");
+        const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 };
+
+        locationWatchId = navigator.geolocation.watchPosition(
+            (position) => {
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+                updateOwnMarker(lat, lon);
+                if (window.socket && window.socket.connected) {
+                    window.socket.emit('update_location', { lat: lat, lon: lon });
+                } else {
+                    console.warn("Socket nicht verbunden. Position konnte nicht gesendet werden.");
+                }
+            },
+            (error) => {
+                console.error("Geolocation Fehler: ", error);
+            },
+            options
+        );
+    }
+
+    // --- Marker-Management (angepasst für DivIcon) ---
+    function createMarkerIcon(username) {
+        const isOwn = username === currentUsername;
+        const isUserMrX = username === mrXUsername;
+        let className = 'player-marker';
+        let iconSize = [15, 15];
+
+        if (isOwn) {
+            className = 'player-marker own-player-marker';
+            iconSize = [18, 18];
+        }
+        if (isUserMrX) {
+             className = 'player-marker mrx-marker';
+             iconSize = [18, 18];
+        }
+
+        return L.divIcon({
+            className: className,
+            iconSize: iconSize,
+            iconAnchor: [iconSize[0] / 2, iconSize[1] / 2],
+            popupAnchor: [0, -iconSize[1] / 2]
+        });
+    }
+
+    function updateOwnMarker(lat, lon) {
+        const latLng = [lat, lon];
+        const icon = createMarkerIcon(currentUsername);
+
+        if (ownMarker) {
+            ownMarker.setLatLng(latLng);
+            if (ownMarker.options.icon.options.className !== icon.options.className) {
+                 ownMarker.setIcon(icon);
+            }
+        } else {
+            ownMarker = L.marker(latLng, { icon: icon, zIndexOffset: 1000 }).addTo(map);
+            ownMarker.bindPopup(`<strong>Das bin ich (${currentUsername})</strong>`);
+        }
+    }
+
+    function updateMarker(username, lat, lon) {
+        if (username === currentUsername) {
+             updateOwnMarker(lat, lon);
+             return;
+        }
+
+        const latLng = [lat, lon];
+        const icon = createMarkerIcon(username);
+
+        if (userMarkers[username]) {
+            userMarkers[username].setLatLng(latLng);
+             if (userMarkers[username].options.icon.options.className !== icon.options.className) {
+                userMarkers[username].setIcon(icon);
+             }
+        } else {
+            const zIndex = (username === mrXUsername) ? 900 : 500;
+            userMarkers[username] = L.marker(latLng, { icon: icon, zIndexOffset: zIndex }).addTo(map);
+            userMarkers[username].bindPopup(`<strong>${username}</strong> ${username === mrXUsername ? '<span style="color:red;">(Mr. X)</span>' : ''}`);
+            console.log(`Marker für ${username} erstellt.`);
+        }
+    }
+
+    function removeMarker(username) {
+        if (userMarkers[username]) {
+            map.removeLayer(userMarkers[username]);
+            delete userMarkers[username];
+            console.log(`Marker für ${username} entfernt.`);
+        }
+    }
+
+    // --- Mr. X Aktionen ---
+    function reportFound() {
+        const finderSelect = document.getElementById('finder-selection');
+        const selectedFinder = finderSelect ? finderSelect.value : null;
+
+        if (!selectedFinder) {
+            alert("Bitte wähle aus, wer dich gefunden hat.");
+            return;
+        }
+
+        console.log(`Melde: Gefunden von ${selectedFinder}`);
+        if (window.socket && window.socket.connected) {
+            window.socket.emit('mr_x_found', { finder: selectedFinder });
+            document.getElementById('found-button').disabled = true;
+            finderSelect.disabled = true;
+        } else {
+            alert("Keine Verbindung zum Server. Konnte Fund nicht melden.");
+        }
+    }
+
+     // --- Hilfsfunktionen für Finder-Liste (nur für Mr. X relevant) ---
+     function updateFinderList(playerUsernames) {
+         const finderSelect = document.getElementById('finder-selection');
+         if (!finderSelect) return; // Nur für Mr. X
+
+         console.log("Updating finder list with players:", playerUsernames); // DEBUG
+
+         const currentSelection = finderSelect.value;
+         while (finderSelect.options.length > 1) { // Behalte die erste "-- auswählen --" Option
+             finderSelect.remove(1);
+         }
+         playerUsernames.forEach(username => {
+             if (username !== currentUsername) { // Mr. X kann sich nicht selbst finden
+                 const option = document.createElement('option');
+                 option.value = username;
+                 option.textContent = username;
+                 finderSelect.appendChild(option);
+             }
+         });
+         // Versuchen, die alte Auswahl wiederherzustellen, falls noch gültig
+         finderSelect.value = currentSelection;
+     }
+
+     function addPlayerToFinderList(username) {
+         const finderSelect = document.getElementById('finder-selection');
+         if (!finderSelect || username === currentUsername) return;
+
+         console.log("Adding player to finder list:", username); // DEBUG
+
+         let exists = false;
+         for (let i = 0; i < finderSelect.options.length; i++) {
+             if (finderSelect.options[i].value === username) {
+                 exists = true;
+                 break;
+             }
+         }
+
+         if (!exists) {
+             const option = document.createElement('option');
+             option.value = username;
+             option.textContent = username;
+             finderSelect.appendChild(option);
+         }
+     }
+
+     function removePlayerFromFinderList(username) {
+         const finderSelect = document.getElementById('finder-selection');
+         if (!finderSelect) return;
+
+         console.log("Removing player from finder list:", username); // DEBUG
+
+         for (let i = 0; i < finderSelect.options.length; i++) {
+             if (finderSelect.options[i].value === username) {
+                 finderSelect.remove(i);
+                 break;
+             }
+         }
+     }
+
+     // --- Temporäre Nachrichten anzeigen ---
+     function showTemporaryMessage(message, type = "info") {
+         const messageDiv = document.createElement('div');
+         messageDiv.textContent = message;
+         messageDiv.style.position = 'absolute';
+         messageDiv.style.top = '10px';
+         messageDiv.style.left = '50%';
+         messageDiv.style.transform = 'translateX(-50%)';
+         messageDiv.style.padding = '10px 20px';
+         messageDiv.style.borderRadius = '5px';
+         messageDiv.style.zIndex = '1500';
+         messageDiv.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+         messageDiv.style.opacity = '1';
+         messageDiv.style.transition = 'opacity 0.5s ease-out';
+
+         if (type === "error") {
+             messageDiv.style.backgroundColor = '#f8d7da';
+             messageDiv.style.color = '#721c24';
+             messageDiv.style.border = '1px solid #f5c6cb';
+         } else if (type === "warning") {
+             messageDiv.style.backgroundColor = '#fcf8e3';
+             messageDiv.style.color = '#8a6d3b';
+             messageDiv.style.border = '1px solid #faebcc';
+         } else { // info
+             messageDiv.style.backgroundColor = '#d9edf7';
+             messageDiv.style.color = '#31708f';
+             messageDiv.style.border = '1px solid #bce8f1';
+         }
+
+         document.getElementById('map-container').appendChild(messageDiv);
+
+         setTimeout(() => {
+             messageDiv.style.opacity = '0';
+             setTimeout(() => {
+                 messageDiv.remove();
+             }, 500);
+         }, 3500);
+     }
+
+</script>
+
+</body>
+</html>
