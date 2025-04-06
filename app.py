@@ -136,27 +136,35 @@ def index():
     if game_state["active"]: return redirect(url_for("map_page"))
     else:
         registered_users = list(loaded_users.keys())
-        # NEU: Prüfen ob der eingeloggte User Admin ist für den Button
         is_admin = loaded_users.get(session['username'], {}).get('is_admin', False)
         return render_template("start.html", registered_users=registered_users, is_admin=is_admin)
 
 @app.route("/start_game", methods=["POST"])
+@admin_required # <-- *** NEU: Decorator hier hinzufügen ***
 def start_game():
-    if "username" not in session: return redirect(url_for("login"))
+    """Nimmt die Spielkonfiguration entgegen und startet das Spiel (nur Admins)."""
+    # Die @admin_required Prüfung stellt sicher, dass nur Admins hierher kommen.
+    # Der 'username' in session ist also sicher vorhanden und ein Admin.
+
     if game_state["active"]:
         flash("Ein Spiel läuft bereits!", "warning")
+        # Admins sollten zur Karte geleitet werden, wenn Spiel schon läuft
         return redirect(url_for("map_page"))
+
     selected_mr_x = request.form.get("mr_x")
     interval_str = request.form.get("interval", "5")
+
     if not selected_mr_x or selected_mr_x not in loaded_users:
         flash("Bitte wähle einen gültigen Spieler als Mr. X aus.", "error")
-        return redirect(url_for("index"))
+        return redirect(url_for("index")) # Zurück zur Startseite (wo der Admin das Formular sieht)
     try:
         interval_minutes = int(interval_str)
         if interval_minutes <= 0: raise ValueError("Interval must be positive")
     except ValueError:
         flash("Bitte gib ein gültiges Update-Intervall (positive Zahl) an.", "error")
         return redirect(url_for("index"))
+
+    # Explizite Initialisierung aller Werte für das neue Spiel:
     game_state["active"] = True
     game_state["mr_x"] = selected_mr_x
     game_state["update_interval_minutes"] = interval_minutes
@@ -167,12 +175,15 @@ def start_game():
     game_state["mrx_decoy_available"] = True
     game_state["mrx_pending_decoy_location"] = None
     game_state["mrx_last_update_was_decoy"] = False
+
     print(f"Spiel gestartet! Mr. X: {selected_mr_x}, Interval: {interval_minutes} min")
     flash(f"Spiel gestartet! {selected_mr_x} ist Mr. X.", "success")
+
     socketio.emit('game_started', {
         'mr_x': game_state['mr_x'],
         'interval': game_state['update_interval_minutes']
     })
+    # Leite den Admin zur Karte weiter
     return redirect(url_for("map_page"))
 
 @app.route("/login", methods=["GET", "POST"])
