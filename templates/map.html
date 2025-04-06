@@ -42,6 +42,13 @@
         #invisibility-button { background-color: #6c757d; } /* Grau */
         #invisibility-button:hover { background-color: #5a6268; }
         #invisibility-button.active { background-color: #31708f !important; } /* Dunkleres Blau wenn aktiv */
+        /* Style für Invis Timer */
+        #invisibility-timer-display {
+            margin-left: 15px;
+            font-weight: bold;
+            color: #31708f;
+            display: none; /* Standardmäßig versteckt */
+        }
 
         #game-over-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); color: white; display: none; justify-content: center; align-items: center; text-align: center; z-index: 1000; font-size: 1.5em; }
         #game-over-overlay h2 { margin-bottom: 20px; }
@@ -108,7 +115,8 @@
      <button id="invisibility-button" {% if seeker_remaining_invisibility <= 0 %}disabled{% endif %}>
         Unsichtbarkeit ({{ seeker_remaining_invisibility }} verfügbar)
     </button>
-    <!-- Hier könnten weitere Sucher-Aktionen hin -->
+    <!-- Anzeige für Unsichtbarkeits-Timer -->
+    <div id="invisibility-timer-display">Unsichtbar für: <span>--:--</span></div>
 </div>
 {% endif %}
 
@@ -133,7 +141,10 @@
     // Unsichtbarkeit
     let seekerRemainingInvisibility = {{ seeker_remaining_invisibility | default(0) }};
     let isInvisible = false; // Lokaler Status, ob Unsichtbarkeit gerade aktiv ist
-    let invisibilityTimeoutId = null; // Für lokalen Timer zum Re-Aktivieren des Buttons
+    let invisibilityTimeoutId = null; // Für lokalen Timeout zum Beenden
+    let invisibilityCountdownIntervalId = null; // Für Anzeige-Update
+    const invisibilityTimerElement = document.getElementById('invisibility-timer-display');
+    const invisibilityTimerSpan = invisibilityTimerElement ? invisibilityTimerElement.querySelector('span') : null; // Sicherer Zugriff
 
     // --- Initialisierung ---
     document.addEventListener('DOMContentLoaded', () => {
@@ -180,6 +191,7 @@
         socket.on('disconnect', (reason) => {
             console.warn('WebSocket-Verbindung getrennt:', reason);
             stopTimer();
+            stopInvisibilityCountdown();
         });
         socket.on('connect_error', (err) => console.error('WebSocket Verbindungsfehler:', err));
 
@@ -248,9 +260,10 @@
             console.log(`Spieler beigetreten: ${data.username}`);
             addPlayerToFinderList(data.username);
             showTemporaryMessage(`${data.username} ist dem Spiel beigetreten.`, "info");
+            // Marker wird bei erstem 'location_update' oder 'player_visible' erstellt
         });
 
-        socket.on('player_left', (data) => {
+        socket.on('player_left', (data) => { // Wird nur noch für normale Spieler gesendet
             console.log(`Spieler gegangen: ${data.username}`);
             removeMarker(data.username);
             removePlayerFromFinderList(data.username);
@@ -287,22 +300,41 @@
                 isInvisible = true;
                 updateInvisibilityButtonState();
                 showTemporaryMessage(`Du bist jetzt für ${data.duration} Sekunden unsichtbar!`, "info");
-                clearTimeout(invisibilityTimeoutId);
-                invisibilityTimeoutId = setTimeout(() => {
-                    isInvisible = false;
-                    updateInvisibilityButtonState();
-                }, data.duration * 1000);
+                // Starte lokalen Countdown-Timer
+                startInvisibilityCountdown(data.duration);
             }
         });
         socket.on('invisibility_ended', () => {
              if (!isMrX) {
                 console.log("Invisibility ended.");
                 isInvisible = false;
-                clearTimeout(invisibilityTimeoutId);
+                stopInvisibilityCountdown(); // Stoppt Timer und versteckt Anzeige
                 updateInvisibilityButtonState();
                 showTemporaryMessage("Du bist wieder sichtbar!", "info");
             }
         });
+        // Listener für andere Spieler, die unsichtbar werden/sind
+        socket.on('player_invisible', (data) => {
+            if (data.username !== currentUsername) { // Nicht für sich selbst
+                console.log(`Player ${data.username} is now invisible.`);
+                removeMarker(data.username); // Marker entfernen
+                showTemporaryMessage(`${data.username} ist unsichtbar geworden!`, 'warning');
+            }
+        });
+        // Listener für andere Spieler, die sichtbar werden
+        socket.on('player_visible', (data) => {
+             if (data.username !== currentUsername) { // Nicht für sich selbst
+                console.log(`Player ${data.username} is visible again.`);
+                if (data.lat !== undefined && data.lon !== undefined && data.lat !== null) {
+                    updateMarker(data.username, data.lat, data.lon); // Marker hinzufügen/aktualisieren
+                    showTemporaryMessage(`${data.username} ist wieder sichtbar!`, 'info');
+                } else {
+                     console.warn(`Player ${data.username} became visible but location is missing.`);
+                     showTemporaryMessage(`${data.username} ist wieder sichtbar!`, 'info');
+                }
+            }
+        });
+
 
         socket.on('game_over', (data) => {
             console.log("Spiel vorbei!", data);
@@ -311,7 +343,7 @@
             if (locationWatchId) { navigator.geolocation.clearWatch(locationWatchId); locationWatchId = null; }
             if (isPlacingDecoy) { exitDecoyPlacementMode(); }
             stopTimer();
-            // Deaktiviere alle Aktionsbuttons bei Spielende
+            stopInvisibilityCountdown(); // Auch Invis-Timer stoppen
             const mrxActions = document.getElementById('mrx-actions');
             if (mrxActions) mrxActions.querySelectorAll('button, select').forEach(el => el.disabled = true);
             const seekerActions = document.getElementById('seeker-actions');
@@ -333,33 +365,19 @@
     // --- Geolocation ---
     let locationWatchId = null;
     function startLocationWatch() {
-        if (!navigator.geolocation) {
-            console.error("Geolocation wird nicht unterstützt.");
-            alert("Dein Browser unterstützt Geolocation nicht.");
-            return;
-        }
+        if (!navigator.geolocation) { console.error("Geolocation wird nicht unterstützt."); alert("Dein Browser unterstützt Geolocation nicht."); return; }
         console.log("Starte Geolocation Watch...");
         const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 };
-
         locationWatchId = navigator.geolocation.watchPosition(
             (position) => {
-                const lat = position.coords.latitude;
-                const lon = position.coords.longitude;
-                // Nur Nicht-MrX-Spieler aktualisieren ihren Marker sofort lokal.
-                if (!isMrX) {
-                    updateOwnMarker(lat, lon);
-                }
-                // Position IMMER an den Server senden (für alle Spieler)
-                if (window.socket && window.socket.connected) {
-                    window.socket.emit('update_location', { lat: lat, lon: lon });
-                } else {
-                    console.warn("Socket nicht verbunden. Position konnte nicht gesendet werden.");
-                }
+                const lat = position.coords.latitude; const lon = position.coords.longitude;
+                // JEDER aktualisiert seinen EIGENEN Marker lokal sofort
+                updateOwnMarker(lat, lon);
+                // Position IMMER an den Server senden
+                if (window.socket && window.socket.connected) { window.socket.emit('update_location', { lat: lat, lon: lon }); }
+                else { console.warn("Socket nicht verbunden. Position konnte nicht gesendet werden."); }
             },
-            (error) => {
-                console.error("Geolocation Fehler: ", error);
-            },
-            options
+            (error) => { console.error("Geolocation Fehler: ", error); }, options
         );
     }
 
@@ -491,15 +509,10 @@
 
     // --- Sucher Aktionen ---
     function activateInvisibility() {
-        if (isMrX || seekerRemainingInvisibility <= 0 || isInvisible) {
-            return;
-        }
+        if (isMrX || seekerRemainingInvisibility <= 0 || isInvisible) { return; }
         console.log("Requesting invisibility...");
-        if (window.socket && window.socket.connected) {
-            window.socket.emit('activate_invisibility');
-        } else {
-            alert("Keine Verbindung zum Server. Unsichtbarkeit konnte nicht aktiviert werden.");
-        }
+        if (window.socket && window.socket.connected) { window.socket.emit('activate_invisibility'); }
+        else { alert("Keine Verbindung zum Server. Unsichtbarkeit konnte nicht aktiviert werden."); }
     }
 
     function updateInvisibilityButtonState() {
@@ -508,7 +521,7 @@
         invisButton.classList.remove('active');
         if (isInvisible) {
             invisButton.disabled = true;
-            invisButton.textContent = "Unsichtbar aktiv";
+            invisButton.textContent = "Unsichtbar aktiv"; // Timer wird separat angezeigt
             invisButton.classList.add('active');
         } else if (seekerRemainingInvisibility > 0) {
             invisButton.disabled = false;
@@ -582,7 +595,7 @@
          }, 3500);
      }
 
-    // --- Timer Funktionen ---
+    // --- Timer Funktionen (Mr. X Update) ---
     function startTimer() {
         stopTimer();
         if (mrxUpdateIntervalSeconds > 0) {
@@ -621,6 +634,33 @@
         const paddedMinutes = String(minutes).padStart(2, '0');
         const paddedSeconds = String(seconds).padStart(2, '0');
         return `${paddedMinutes}:${paddedSeconds}`;
+    }
+
+    // --- Timer Funktionen (Unsichtbarkeit) ---
+    function startInvisibilityCountdown(durationSeconds) {
+        stopInvisibilityCountdown();
+        if (!invisibilityTimerElement || !invisibilityTimerSpan) return;
+        let remaining = durationSeconds;
+        const endTimeMs = Date.now() + (durationSeconds * 1000);
+        function updateDisplay() {
+            const nowMs = Date.now();
+            remaining = Math.max(0, Math.round((endTimeMs - nowMs) / 1000));
+            invisibilityTimerSpan.textContent = formatTime(remaining);
+            if (remaining <= 0) { stopInvisibilityCountdown(); }
+        }
+        invisibilityTimerElement.style.display = 'inline';
+        updateDisplay();
+        invisibilityCountdownIntervalId = setInterval(updateDisplay, 1000);
+    }
+
+    function stopInvisibilityCountdown() {
+        if (invisibilityCountdownIntervalId) {
+            clearInterval(invisibilityCountdownIntervalId);
+            invisibilityCountdownIntervalId = null;
+        }
+        if (invisibilityTimerElement) {
+            invisibilityTimerElement.style.display = 'none';
+        }
     }
 
 </script>
