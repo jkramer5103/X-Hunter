@@ -54,7 +54,6 @@
             {% if username == mr_x_username %}(Du bist Mr. X){% endif %}
         </span>
     </div>
-    <!-- Timer Anzeige -->
     <div id="timer-info">
         Nächstes Mr. X Update in: <span id="mrx-timer-display">--:--</span>
     </div>
@@ -75,8 +74,9 @@
 
 {% if username == mr_x_username %}
 <div id="mrx-actions">
-    <button id="decoy-button" {% if not mrx_decoy_available %}disabled{% endif %}>
-        {% if mrx_decoy_available %}Ablenkungsmanöver (1 verfügbar){% else %}Ablenkungsmanöver benutzt{% endif %}
+    <!-- Button zeigt jetzt verbleibende Anzahl an -->
+    <button id="decoy-button" {% if mrx_remaining_decoys <= 0 %}disabled{% endif %}>
+        Ablenkungsmanöver ({{ mrx_remaining_decoys }} verfügbar)
     </button>
     <div>
         <label for="finder-selection">Ich wurde gefunden von:</label>
@@ -100,7 +100,8 @@
     const mrXUsername = "{{ mr_x_username }}";
     let ownMarker = null;
     let isMrX = currentUsername === mrXUsername;
-    let mrxDecoyAvailable = "{{ mrx_decoy_available }}" === "True";
+    // Verbleibende Decoys speichern
+    let mrxRemainingDecoys = {{ mrx_remaining_decoys | default(0) }};
     let isPlacingDecoy = false;
     let tempDecoyMarker = null;
     // Timer Variablen
@@ -113,7 +114,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         console.log("DOM geladen. Initialisiere Karte und SocketIO.");
         if (isMrX) {
-            updateDecoyButtonState();
+            updateDecoyButtonState(); // Aktualisiert Button mit initialer Anzahl
         }
         initializeMap();
         initializeSocketIO();
@@ -175,8 +176,9 @@
             }
 
             updateFinderList(data.players || []);
-            if (isMrX && data.mrx_decoy_available !== null && data.mrx_decoy_available !== undefined) {
-                mrxDecoyAvailable = data.mrx_decoy_available;
+            // Update verbleibende Decoys bei Reconnect
+            if (isMrX && data.mrx_remaining_decoys !== null && data.mrx_remaining_decoys !== undefined) {
+                mrxRemainingDecoys = data.mrx_remaining_decoys;
                 updateDecoyButtonState();
             }
 
@@ -220,15 +222,18 @@
             showTemporaryMessage(`${data.username} hat das Spiel verlassen.`, "warning");
         });
 
+        // Bestätigung enthält jetzt verbleibende Decoys
         socket.on('decoy_set_confirmation', (data) => {
             console.log("Decoy wurde vom Server bestätigt:", data);
             showTemporaryMessage("Ablenkungsmanöver gesetzt! Der falsche Standort wird beim nächsten Update gesendet.", "success");
-            mrxDecoyAvailable = false;
-            updateDecoyButtonState();
-            if (tempDecoyMarker) {
-                map.removeLayer(tempDecoyMarker);
-                tempDecoyMarker = null;
+            // Update Zähler basierend auf Server-Antwort
+            if (data.remaining_decoys !== undefined) {
+                mrxRemainingDecoys = data.remaining_decoys;
+            } else {
+                mrxRemainingDecoys = 0; // Fallback
             }
+            updateDecoyButtonState(); // Button aktualisieren
+            if (tempDecoyMarker) { map.removeLayer(tempDecoyMarker); tempDecoyMarker = null; }
         });
 
         // Listener für Timer-Reset
@@ -371,7 +376,8 @@
     }
 
     function toggleDecoyPlacement() {
-        if (!isMrX || !mrxDecoyAvailable) return;
+        // Prüfe verbleibende Decoys
+        if (!isMrX || mrxRemainingDecoys <= 0) return;
         isPlacingDecoy = !isPlacingDecoy;
         if (isPlacingDecoy) { enterDecoyPlacementMode(); }
         else { exitDecoyPlacementMode(); }
@@ -391,7 +397,7 @@
         console.log("Exiting decoy placement mode.");
         isPlacingDecoy = false;
         document.getElementById('map').classList.remove('decoy-placement-active');
-        updateDecoyButtonState();
+        updateDecoyButtonState(); // Setzt Text/Status basierend auf verbleibender Anzahl
          if (tempDecoyMarker) { map.removeLayer(tempDecoyMarker); tempDecoyMarker = null; }
     }
 
@@ -409,12 +415,18 @@
         exitDecoyPlacementMode();
     }
 
+    // Aktualisiert Text und Status basierend auf mrxRemainingDecoys
     function updateDecoyButtonState() {
         const decoyButton = document.getElementById('decoy-button');
         if (!decoyButton) return;
         decoyButton.classList.remove('placing');
-        if (mrxDecoyAvailable) { decoyButton.disabled = false; decoyButton.textContent = "Ablenkungsmanöver (1 verfügbar)"; }
-        else { decoyButton.disabled = true; decoyButton.textContent = "Ablenkungsmanöver benutzt"; }
+        if (mrxRemainingDecoys > 0) {
+            decoyButton.disabled = false;
+            decoyButton.textContent = `Ablenkungsmanöver (${mrxRemainingDecoys} verfügbar)`;
+        } else {
+            decoyButton.disabled = true;
+            decoyButton.textContent = "Keine Ablenkungsmanöver mehr";
+        }
     }
 
     // --- Hilfsfunktionen für Finder-Liste ---

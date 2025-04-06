@@ -48,7 +48,6 @@
       {% endif %}
     {% endwith %}
 
-    <!-- *** ÄNDERUNG HIER: Bedingte Anzeige *** -->
     {% if is_admin %}
         <h2>Neues Spiel starten</h2>
         <form action="{{ url_for('start_game') }}" method="post">
@@ -65,26 +64,26 @@
                 <label for="interval">Update-Intervall für Mr. X (Minuten):</label>
                 <input type="number" id="interval" name="interval" min="1" value="5" required>
             </div>
+            <!-- NEU: Input für Anzahl Decoys -->
+            <div>
+                <label for="num_decoys">Anzahl Ablenkungsmanöver für Mr. X:</label>
+                <input type="number" id="num_decoys" name="num_decoys" min="0" value="{{ default_decoys }}" required>
+            </div>
             <button type="submit">Spiel starten</button>
         </form>
     {% else %}
-        <!-- Nachricht für Nicht-Admins -->
         <div class="wait-message">
             <h2>Warte auf Spielstart</h2>
             <p>Ein Administrator muss das Spiel starten.</p>
             <p>Du wirst automatisch zur Karte weitergeleitet, wenn das Spiel beginnt.</p>
         </div>
     {% endif %}
-    <!-- *** ENDE ÄNDERUNG *** -->
-
 
 <script>
-    // SocketIO bleibt für alle aktiv, um den Spielstart mitzubekommen
     const socket = io();
     socket.on('connect', () => { console.log('Verbunden mit Server auf Startseite.'); });
     socket.on('game_started', (data) => {
         console.log('Spiel wurde gestartet!', data);
-        // Leite *alle* Benutzer zur Karte weiter, wenn das Spiel startet
         window.location.href = "{{ url_for('map_page') }}";
     });
      socket.on('redirect', (data) => {
