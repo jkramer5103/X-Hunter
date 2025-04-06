@@ -1,0 +1,25 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "main" ]
+  release:
+    types: [created]
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build the Docker image
+        run: docker build . --file Dockerfile --tag jkramer5103/x-hunter:${GITHUB_SHA}
+      - name: Log in to Docker Hub
+        run: docker login -u ${{ secrets.DOCKERHUB_USERNAME }} -p ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Push the Docker image
+        run: docker push jkramer5103/x-hunter:${GITHUB_SHA}
+      - name: Push the Docker image with tag latest
+        run: docker tag jkramer5103/x-hunter:${GITHUB_SHA} jkramer5103/x-hunter:latest && docker push jkramer5103/x-hunter:latest
