@@ -23,39 +23,39 @@
         #header .game-info .mrx { color: #d9534f; }
         #header a { text-decoration: none; color: #007bff; margin-left: 10px; }
         #timer-info { font-weight: bold; color: #555; background-color: #e9ecef; padding: 5px 10px; border-radius: 4px; }
-        /* Gemeinsame Styles für Aktionsleisten */
         .action-bar { display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 10px; text-align: center; padding: 10px; border-top: 1px solid #ccc; flex-shrink: 0; }
         .action-bar button { padding: 8px 15px; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
         .action-bar button:hover { opacity: 0.9; }
         .action-bar button:disabled { background-color: #aaa !important; cursor: not-allowed; opacity: 0.7; }
         .action-bar label { margin: 0; }
         .action-bar select { margin-left: 5px; padding: 5px; border-radius: 3px; border: 1px solid #ccc; }
-        /* Mr. X Aktionen */
         #mrx-actions { background-color: #f8d7da; border-color: #f5c6cb; }
         #mrx-actions button { background-color: #d9534f; }
         #mrx-actions button:hover { background-color: #c9302c; }
-        #decoy-button { background-color: #f0ad4e !important; } /* Wichtig für Überschreiben */
+        #decoy-button { background-color: #f0ad4e !important; }
         #decoy-button:hover { background-color: #ec971f !important; }
         #decoy-button.placing { background-color: #5bc0de !important; }
-        /* Sucher Aktionen */
         #seeker-actions { background-color: #d9edf7; border-color: #bce8f1; }
-        #invisibility-button { background-color: #6c757d; } /* Grau */
+        #invisibility-button { background-color: #6c757d; }
         #invisibility-button:hover { background-color: #5a6268; }
-        #invisibility-button.active { background-color: #31708f !important; } /* Dunkleres Blau wenn aktiv */
-        /* Style für Invis Timer */
-        #invisibility-timer-display {
-            margin-left: 15px;
-            font-weight: bold;
-            color: #31708f;
-            display: none; /* Standardmäßig versteckt */
-        }
-
+        #invisibility-button.active { background-color: #31708f !important; }
+        #invisibility-timer-display { margin-left: 15px; font-weight: bold; color: #31708f; display: none; }
         #game-over-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); color: white; display: none; justify-content: center; align-items: center; text-align: center; z-index: 1000; font-size: 1.5em; }
         #game-over-overlay h2 { margin-bottom: 20px; }
         #game-over-overlay button { margin-top: 20px; padding: 10px 20px; font-size: 1em; cursor: pointer; }
+        /* Marker Styles */
         .player-marker { background-color: rgba(51, 136, 255, 0.8); border: 2px solid white; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5); width: 15px; height: 15px; }
         .own-player-marker { background-color: rgba(0, 123, 255, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 6px rgba(0, 123, 255, 0.7); }
         .mrx-marker { background-color: rgba(217, 83, 79, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 8px rgba(255, 0, 0, 0.8); }
+        /* Mr. X Echtzeit-Marker */
+        .mrx-realtime-marker {
+            background-color: rgba(255, 0, 0, 0.7); /* Rot, etwas transparent */
+            border: 1px solid white;
+            border-radius: 50%;
+            width: 10px; /* Kleiner */
+            height: 10px;
+            box-shadow: 0 0 3px rgba(255,0,0,0.6);
+        }
         .decoy-placement-marker { background-color: rgba(240, 173, 78, 0.7); border: 2px dashed white; border-radius: 50%; width: 20px; height: 20px; }
         .map-popup-button { padding: 5px 10px; margin-top: 8px; font-size: 0.9em; background-color: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; }
         .map-popup-button:hover { background-color: #5a6268; }
@@ -115,7 +115,6 @@
      <button id="invisibility-button" {% if seeker_remaining_invisibility <= 0 %}disabled{% endif %}>
         Unsichtbarkeit ({{ seeker_remaining_invisibility }} verfügbar)
     </button>
-    <!-- Anzeige für Unsichtbarkeits-Timer -->
     <div id="invisibility-timer-display">Unsichtbar für: <span>--:--</span></div>
 </div>
 {% endif %}
@@ -127,8 +126,10 @@
     let userMarkers = {};
     const currentUsername = "{{ username }}";
     const mrXUsername = "{{ mr_x_username }}";
-    let ownMarker = null;
+    let ownMarker = null; // Repräsentiert die gesendete Position (für alle)
     let isMrX = currentUsername === mrXUsername;
+    // Separater Marker für Mr. X Echtzeitposition
+    let mrxRealTimeMarker = null;
     // Decoy
     let mrxRemainingDecoys = {{ mrx_remaining_decoys | default(0) }};
     let isPlacingDecoy = false;
@@ -140,31 +141,27 @@
     const timerDisplayElement = document.getElementById('mrx-timer-display');
     // Unsichtbarkeit
     let seekerRemainingInvisibility = {{ seeker_remaining_invisibility | default(0) }};
-    let isInvisible = false; // Lokaler Status, ob Unsichtbarkeit gerade aktiv ist
-    let invisibilityTimeoutId = null; // Für lokalen Timeout zum Beenden
-    let invisibilityCountdownIntervalId = null; // Für Anzeige-Update
+    let isInvisible = false;
+    let invisibilityTimeoutId = null;
+    let invisibilityCountdownIntervalId = null;
     const invisibilityTimerElement = document.getElementById('invisibility-timer-display');
-    const invisibilityTimerSpan = invisibilityTimerElement ? invisibilityTimerElement.querySelector('span') : null; // Sicherer Zugriff
+    const invisibilityTimerSpan = invisibilityTimerElement ? invisibilityTimerElement.querySelector('span') : null;
 
     // --- Initialisierung ---
     document.addEventListener('DOMContentLoaded', () => {
         console.log("DOM geladen. Initialisiere Karte und SocketIO.");
-        if (isMrX) {
-            updateDecoyButtonState(); // Aktualisiert Button mit initialer Anzahl
-        } else {
-            updateInvisibilityButtonState(); // Initialisiere Sucher-Button
-        }
+        if (isMrX) { updateDecoyButtonState(); }
+        else { updateInvisibilityButtonState(); }
         initializeMap();
         initializeSocketIO();
         startLocationWatch();
 
-        // Event Listener
         const foundButton = document.getElementById('found-button');
         if (foundButton) foundButton.addEventListener('click', reportFound);
         const decoyButton = document.getElementById('decoy-button');
         if (decoyButton) decoyButton.addEventListener('click', toggleDecoyPlacement);
         const invisibilityButton = document.getElementById('invisibility-button');
-        if (invisibilityButton) invisibilityButton.addEventListener('click', activateInvisibility); // Neuer Listener
+        if (invisibilityButton) invisibilityButton.addEventListener('click', activateInvisibility);
 
         document.getElementById('back-to-start-button').addEventListener('click', () => {
             window.location.href = "{{ url_for('index') }}";
@@ -188,82 +185,61 @@
         window.socket = socket;
 
         socket.on('connect', () => console.log('Verbunden mit WebSocket-Server (Karte).'));
-        socket.on('disconnect', (reason) => {
-            console.warn('WebSocket-Verbindung getrennt:', reason);
-            stopTimer();
-            stopInvisibilityCountdown();
-        });
+        socket.on('disconnect', (reason) => { console.warn('WebSocket-Verbindung getrennt:', reason); stopTimer(); stopInvisibilityCountdown(); });
         socket.on('connect_error', (err) => console.error('WebSocket Verbindungsfehler:', err));
 
         socket.on('game_update', (data) => {
             console.log('Spielstatus-Update erhalten:', data);
             Object.keys(userMarkers).forEach(username => removeMarker(username));
             if (ownMarker) { map.removeLayer(ownMarker); ownMarker = null; }
+            if (mrxRealTimeMarker) { map.removeLayer(mrxRealTimeMarker); mrxRealTimeMarker = null; } // Auch Echtzeit-Marker entfernen
 
             if (data.locations) {
                 for (const username in data.locations) {
                     const locData = data.locations[username];
                     if (locData && locData.lat !== undefined && locData.lon !== undefined) {
                         if (username === currentUsername) {
-                            updateOwnMarker(locData.lat, locData.lon);
+                            updateOwnMarker(locData.lat, locData.lon); // Aktualisiert den 'gesendeten' Marker
                         } else {
                             updateMarker(username, locData.lat, locData.lon);
                         }
-                    } else {
-                         console.warn(`Unvollständige Standortdaten für ${username} in game_update:`, locData);
-                    }
+                    } else { console.warn(`Unvollständige Standortdaten für ${username} in game_update:`, locData); }
                 }
-            } else {
-                console.warn("game_update ohne Standortdaten empfangen.");
-            }
+            } else { console.warn("game_update ohne Standortdaten empfangen."); }
 
             updateFinderList(data.players || []);
-            // Update Decoy Button Status
             if (isMrX && data.mrx_remaining_decoys !== null && data.mrx_remaining_decoys !== undefined) {
-                mrxRemainingDecoys = data.mrx_remaining_decoys;
-                updateDecoyButtonState();
+                mrxRemainingDecoys = data.mrx_remaining_decoys; updateDecoyButtonState();
             }
-            // Update Invis Button Status
             if (!isMrX && data.seeker_remaining_invisibility !== null && data.seeker_remaining_invisibility !== undefined) {
-                seekerRemainingInvisibility = data.seeker_remaining_invisibility;
-                updateInvisibilityButtonState();
+                seekerRemainingInvisibility = data.seeker_remaining_invisibility; updateInvisibilityButtonState();
             }
-
-            // Timer initialisieren/starten
             if (data.mrx_update_interval_minutes && data.mrx_last_broadcast_time !== undefined) {
                 mrxUpdateIntervalSeconds = data.mrx_update_interval_minutes * 60;
                 mrxLastBroadcastTimestampMs = data.mrx_last_broadcast_time * 1000;
                 console.log(`Timer init: Interval=${mrxUpdateIntervalSeconds}s, LastBroadcast=${new Date(mrxLastBroadcastTimestampMs).toLocaleTimeString()}`);
                 startTimer();
-            } else {
-                console.warn("Timer-Daten in game_update fehlen.");
-                timerDisplayElement.textContent = "N/A";
-            }
+            } else { console.warn("Timer-Daten in game_update fehlen."); timerDisplayElement.textContent = "N/A"; }
         });
 
         socket.on('location_update', (data) => {
-            if (data.previous_was_decoy) {
-                showTemporaryMessage(`Achtung! Der vorherige Standort von Mr. X (${mrXUsername}) war ein Ablenkungsmanöver!`, "warning");
-            }
+            if (data.previous_was_decoy) { showTemporaryMessage(`Achtung! Der vorherige Standort von Mr. X (${mrXUsername}) war ein Ablenkungsmanöver!`, "warning"); }
             if (data.lat !== undefined && data.lon !== undefined) {
                 if (data.username === currentUsername) {
-                    updateOwnMarker(data.lat, data.lon);
+                    updateOwnMarker(data.lat, data.lon); // Aktualisiert den 'gesendeten' Marker
                 } else {
                     updateMarker(data.username, data.lat, data.lon);
                 }
-            } else {
-                 console.warn(`Unvollständige Standortdaten in location_update für ${data.username}:`, data);
-            }
+            } else { console.warn(`Unvollständige Standortdaten in location_update für ${data.username}:`, data); }
         });
 
         socket.on('player_joined', (data) => {
             console.log(`Spieler beigetreten: ${data.username}`);
             addPlayerToFinderList(data.username);
             showTemporaryMessage(`${data.username} ist dem Spiel beigetreten.`, "info");
-            // Marker wird bei erstem 'location_update' oder 'player_visible' erstellt
         });
 
-        socket.on('player_left', (data) => { // Wird nur noch für normale Spieler gesendet
+        socket.on('player_left', (data) => {
             console.log(`Spieler gegangen: ${data.username}`);
             removeMarker(data.username);
             removePlayerFromFinderList(data.username);
@@ -273,11 +249,8 @@
         socket.on('decoy_set_confirmation', (data) => {
             console.log("Decoy wurde vom Server bestätigt:", data);
             showTemporaryMessage("Ablenkungsmanöver gesetzt! Der falsche Standort wird beim nächsten Update gesendet.", "success");
-            if (data.remaining_decoys !== undefined) {
-                mrxRemainingDecoys = data.remaining_decoys;
-            } else {
-                mrxRemainingDecoys = 0;
-            }
+            if (data.remaining_decoys !== undefined) { mrxRemainingDecoys = data.remaining_decoys; }
+            else { mrxRemainingDecoys = 0; }
             updateDecoyButtonState();
             if (tempDecoyMarker) { map.removeLayer(tempDecoyMarker); tempDecoyMarker = null; }
         });
@@ -287,12 +260,9 @@
                 mrxLastBroadcastTimestampMs = data.last_broadcast_time * 1000;
                 console.log(`Timer reset: LastBroadcast=${new Date(mrxLastBroadcastTimestampMs).toLocaleTimeString()}`);
                 updateTimerDisplay();
-            } else {
-                console.warn("mrx_update_timer Event ohne Zeitstempel empfangen.");
-            }
+            } else { console.warn("mrx_update_timer Event ohne Zeitstempel empfangen."); }
         });
 
-        // Listener für Unsichtbarkeit
         socket.on('invisibility_activated', (data) => {
             if (!isMrX) {
                 console.log("Invisibility activated:", data);
@@ -300,7 +270,6 @@
                 isInvisible = true;
                 updateInvisibilityButtonState();
                 showTemporaryMessage(`Du bist jetzt für ${data.duration} Sekunden unsichtbar!`, "info");
-                // Starte lokalen Countdown-Timer
                 startInvisibilityCountdown(data.duration);
             }
         });
@@ -308,25 +277,23 @@
              if (!isMrX) {
                 console.log("Invisibility ended.");
                 isInvisible = false;
-                stopInvisibilityCountdown(); // Stoppt Timer und versteckt Anzeige
+                stopInvisibilityCountdown();
                 updateInvisibilityButtonState();
                 showTemporaryMessage("Du bist wieder sichtbar!", "info");
             }
         });
-        // Listener für andere Spieler, die unsichtbar werden/sind
         socket.on('player_invisible', (data) => {
-            if (data.username !== currentUsername) { // Nicht für sich selbst
+            if (data.username !== currentUsername) {
                 console.log(`Player ${data.username} is now invisible.`);
-                removeMarker(data.username); // Marker entfernen
+                removeMarker(data.username);
                 showTemporaryMessage(`${data.username} ist unsichtbar geworden!`, 'warning');
             }
         });
-        // Listener für andere Spieler, die sichtbar werden
         socket.on('player_visible', (data) => {
-             if (data.username !== currentUsername) { // Nicht für sich selbst
+             if (data.username !== currentUsername) {
                 console.log(`Player ${data.username} is visible again.`);
                 if (data.lat !== undefined && data.lon !== undefined && data.lat !== null) {
-                    updateMarker(data.username, data.lat, data.lon); // Marker hinzufügen/aktualisieren
+                    updateMarker(data.username, data.lat, data.lon);
                     showTemporaryMessage(`${data.username} ist wieder sichtbar!`, 'info');
                 } else {
                      console.warn(`Player ${data.username} became visible but location is missing.`);
@@ -335,7 +302,6 @@
             }
         });
 
-
         socket.on('game_over', (data) => {
             console.log("Spiel vorbei!", data);
             document.getElementById('game-over-message').innerText = data.message;
@@ -343,7 +309,8 @@
             if (locationWatchId) { navigator.geolocation.clearWatch(locationWatchId); locationWatchId = null; }
             if (isPlacingDecoy) { exitDecoyPlacementMode(); }
             stopTimer();
-            stopInvisibilityCountdown(); // Auch Invis-Timer stoppen
+            stopInvisibilityCountdown();
+            if (mrxRealTimeMarker) { map.removeLayer(mrxRealTimeMarker); mrxRealTimeMarker = null; } // Echtzeit-Marker entfernen
             const mrxActions = document.getElementById('mrx-actions');
             if (mrxActions) mrxActions.querySelectorAll('button, select').forEach(el => el.disabled = true);
             const seekerActions = document.getElementById('seeker-actions');
@@ -371,8 +338,13 @@
         locationWatchId = navigator.geolocation.watchPosition(
             (position) => {
                 const lat = position.coords.latitude; const lon = position.coords.longitude;
-                // JEDER aktualisiert seinen EIGENEN Marker lokal sofort
-                updateOwnMarker(lat, lon);
+                // Mr. X aktualisiert seinen Echtzeit-Marker
+                if (isMrX) {
+                    updateMrXRealTimeMarker(lat, lon);
+                } else {
+                // Sucher aktualisieren ihren normalen 'ownMarker'
+                    updateOwnMarker(lat, lon);
+                }
                 // Position IMMER an den Server senden
                 if (window.socket && window.socket.connected) { window.socket.emit('update_location', { lat: lat, lon: lon }); }
                 else { console.warn("Socket nicht verbunden. Position konnte nicht gesendet werden."); }
@@ -394,13 +366,20 @@
 
     function createPopupContent(username, lat, lon) {
         const mapsUrl = `https://www.google.com/maps?q=${lat},${lon}`;
-        let title = `<strong>${username}</strong>`;
-        if (username === mrXUsername) { title += ' <span style="color:red;">(Mr. X)</span>'; }
-        else if (username === currentUsername) { title = `<strong>Das bin ich (${currentUsername})</strong>`; }
+        let title;
+        if (username === currentUsername && isMrX) {
+             title = `<strong>Deine gesendete Position</strong><br><span style="font-size:0.9em;">(Was Sucher sehen)</span>`;
+        } else if (username === currentUsername) {
+             title = `<strong>Das bin ich (${currentUsername})</strong>`;
+        } else {
+             title = `<strong>${username}</strong>`;
+             if (username === mrXUsername) title += ' <span style="color:red;">(Mr. X)</span>';
+        }
         const buttonHtml = `<button class="map-popup-button" onclick="window.open('${mapsUrl}', '_blank')">In Google Maps öffnen</button>`;
         return `${title}<br>${buttonHtml}`;
     }
 
+    // Aktualisiert den 'gesendeten' Marker für den aktuellen Benutzer
     function updateOwnMarker(lat, lon) {
         const latLng = [lat, lon];
         const icon = createMarkerIcon(currentUsername);
@@ -415,8 +394,23 @@
         }
     }
 
+    // Aktualisiert den Echtzeit-Marker für Mr. X
+    function updateMrXRealTimeMarker(lat, lon) {
+        if (!isMrX) return;
+        const latLng = [lat, lon];
+        const icon = L.divIcon({ className: 'mrx-realtime-marker', iconSize: [10, 10], iconAnchor: [5, 5] });
+        // const popupContent = "<strong>Deine ECHTE Position</strong><br>(Nur für dich sichtbar)"; // Popup optional
+        if (mrxRealTimeMarker) {
+            mrxRealTimeMarker.setLatLng(latLng);
+        } else {
+            mrxRealTimeMarker = L.marker(latLng, { icon: icon, zIndexOffset: 1100, interactive: false }).addTo(map);
+            // mrxRealTimeMarker.bindPopup(popupContent); // Optional Popup binden
+        }
+    }
+
+    // Aktualisiert Marker für ANDERE Spieler
     function updateMarker(username, lat, lon) {
-        if (username === currentUsername) { updateOwnMarker(lat, lon); return; }
+        if (username === currentUsername) { updateOwnMarker(lat, lon); return; } // Sollte nicht passieren
         const latLng = [lat, lon];
         const icon = createMarkerIcon(username);
         const popupContent = createPopupContent(username, lat, lon);
@@ -521,7 +515,7 @@
         invisButton.classList.remove('active');
         if (isInvisible) {
             invisButton.disabled = true;
-            invisButton.textContent = "Unsichtbar aktiv"; // Timer wird separat angezeigt
+            invisButton.textContent = "Unsichtbar aktiv";
             invisButton.classList.add('active');
         } else if (seekerRemainingInvisibility > 0) {
             invisButton.disabled = false;
