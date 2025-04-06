@@ -1,14 +1,18 @@
 {
   "jaron": {
-    "password": "pbkdf2:sha256:600000$Zqgu7xzuTVYNJfTH$d8f94e5f37902a26fb3244101b1c480cf64de497efbda36268f7f55ceecfd047"
+    "password": "pbkdf2:sha256:600000$Zqgu7xzuTVYNJfTH$d8f94e5f37902a26fb3244101b1c480cf64de497efbda36268f7f55ceecfd047",
+    "is_admin": true
   },
   "joon": {
-    "password": "pbkdf2:sha256:600000$ysbTLTHvFzI22ckX$f37638ce01913255b457fa17c38eea53ebb153261b08070c6a92a858c737e6b7"
+    "password": "pbkdf2:sha256:600000$ysbTLTHvFzI22ckX$f37638ce01913255b457fa17c38eea53ebb153261b08070c6a92a858c737e6b7",
+    "is_admin": false
   },
   "jaronpc": {
-    "password": "pbkdf2:sha256:600000$7moAagm71mqO3jjy$76b3ab4c3ff55662b934e336a918d17e08145e999be333aa45cb15a9881782e2"
+    "password": "pbkdf2:sha256:600000$7moAagm71mqO3jjy$76b3ab4c3ff55662b934e336a918d17e08145e999be333aa45cb15a9881782e2",
+    "is_admin": false
   },
   "uli": {
-    "password": "pbkdf2:sha256:600000$4WtN6ii6rJsDm3Wd$a37ea1fc0d038f94d26dcb160c7369a4f36607e52ec4d8d6fe748c3723fc6ec4"
+    "password": "pbkdf2:sha256:600000$4WtN6ii6rJsDm3Wd$a37ea1fc0d038f94d26dcb160c7369a4f36607e52ec4d8d6fe748c3723fc6ec4",
+    "is_admin": false
   }
 }

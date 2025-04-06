@@ -19,22 +19,25 @@
         .flash-error { background-color: #f2dede; color: #a94442; border: 1px solid #ebccd1; }
         .flash-warning { background-color: #fcf8e3; color: #8a6d3b; border: 1px solid #faebcc; }
         .flash-info { background-color: #d9edf7; color: #31708f; border: 1px solid #bce8f1; }
+        .flash-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .user-info { text-align: right; margin-bottom: 15px; color: #666; }
         .user-info a { color: #007bff; text-decoration: none; margin-left: 10px; }
         .user-info a:hover { text-decoration: underline; }
     </style>
-    <!-- Socket.IO Client Library -->
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 <body>
     <div class="user-info">
         Angemeldet als: <strong>{{ session.username }}</strong>
+        <!-- Zeige Link nur für Admins -->
+        {% if is_admin %}
+            <a href="{{ url_for('manage_users') }}">Benutzer verwalten</a>
+        {% endif %}
         <a href="{{ url_for('logout') }}">Logout</a>
     </div>
 
     <h1>Neues "Mr. X"-Spiel starten</h1>
 
-    <!-- Flash Nachrichten anzeigen -->
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <ul class=flash-messages>
@@ -63,24 +66,16 @@
     </form>
 
 <script>
-    // Optional: SocketIO auf dieser Seite, um auf Spielstart zu reagieren
     const socket = io();
-
-    socket.on('connect', () => {
-        console.log('Verbunden mit Server auf Startseite.');
-    });
-
+    socket.on('connect', () => { console.log('Verbunden mit Server auf Startseite.'); });
     socket.on('game_started', (data) => {
         console.log('Spiel wurde gestartet!', data);
-        // Leite den Benutzer zur Kartenseite weiter
         window.location.href = "{{ url_for('map_page') }}";
     });
-
      socket.on('redirect', (data) => {
         console.log('Redirect empfangen:', data.url);
         window.location.href = data.url;
     });
-
 </script>
 
 </body>
