@@ -38,6 +38,26 @@
         .own-player-marker { background-color: rgba(0, 123, 255, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 6px rgba(0, 123, 255, 0.7); }
         .mrx-marker { background-color: rgba(217, 83, 79, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 8px rgba(255, 0, 0, 0.8); }
         .decoy-placement-marker { background-color: rgba(240, 173, 78, 0.7); border: 2px dashed white; border-radius: 50%; width: 20px; height: 20px; }
+
+        /* NEU: Style für den Button im Popup */
+        .map-popup-button {
+            padding: 5px 10px;
+            margin-top: 8px; /* Abstand zum Namen */
+            font-size: 0.9em;
+            background-color: #6c757d; /* Grau */
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .map-popup-button:hover {
+            background-color: #5a6268;
+        }
+        /* Optional: Verhindern, dass der Popup zu breit wird */
+        .leaflet-popup-content {
+             min-width: 130px; /* Mindestbreite für den Button */
+             text-align: center; /* Zentriert den Button */
+        }
     </style>
 </head>
 <body>
@@ -104,7 +124,7 @@
         }
         initializeMap();
         initializeSocketIO();
-        startLocationWatch(); // Startet das Senden der Position für ALLE
+        startLocationWatch();
 
         const foundButton = document.getElementById('found-button');
         if (foundButton) foundButton.addEventListener('click', reportFound);
@@ -290,40 +310,66 @@
         });
     }
 
+    // --- HILFSFUNKTION: Erstellt den HTML-Inhalt für Popups ---
+    function createPopupContent(username, lat, lon) {
+        const mapsUrl = `https://www.google.com/maps?q=${lat},${lon}`;
+        let title = `<strong>${username}</strong>`;
+        if (username === mrXUsername) {
+            title += ' <span style="color:red;">(Mr. X)</span>';
+        } else if (username === currentUsername) {
+            title = `<strong>Das bin ich (${currentUsername})</strong>`;
+        }
+
+        // Erstelle den Button mit der korrekten URL im onclick
+        const buttonHtml = `<button class="map-popup-button" onclick="window.open('${mapsUrl}', '_blank')">In Google Maps öffnen</button>`;
+
+        return `${title}<br>${buttonHtml}`;
+    }
+
+
     function updateOwnMarker(lat, lon) {
         const latLng = [lat, lon];
         const icon = createMarkerIcon(currentUsername);
+        // NEU: Popup-Inhalt generieren
+        const popupContent = createPopupContent(currentUsername, lat, lon);
 
         if (ownMarker) {
             ownMarker.setLatLng(latLng);
             if (ownMarker.options.icon.options.className !== icon.options.className) {
                  ownMarker.setIcon(icon);
             }
+            // NEU: Popup-Inhalt aktualisieren
+            ownMarker.setPopupContent(popupContent);
         } else {
             ownMarker = L.marker(latLng, { icon: icon, zIndexOffset: 1000 }).addTo(map);
-            ownMarker.bindPopup(`<strong>Das bin ich (${currentUsername})</strong>`);
+            // NEU: Popup mit generiertem Inhalt binden
+            ownMarker.bindPopup(popupContent);
         }
     }
 
     function updateMarker(username, lat, lon) {
         if (username === currentUsername) {
-             // Dieser Fall sollte jetzt nur noch durch Server-Updates ausgelöst werden
              updateOwnMarker(lat, lon);
              return;
         }
 
         const latLng = [lat, lon];
         const icon = createMarkerIcon(username);
+        // NEU: Popup-Inhalt generieren
+        const popupContent = createPopupContent(username, lat, lon);
 
         if (userMarkers[username]) {
             userMarkers[username].setLatLng(latLng);
              if (userMarkers[username].options.icon.options.className !== icon.options.className) {
                 userMarkers[username].setIcon(icon);
              }
+             // NEU: Popup-Inhalt aktualisieren
+             userMarkers[username].setPopupContent(popupContent);
         } else {
             const zIndex = (username === mrXUsername) ? 900 : 500;
             userMarkers[username] = L.marker(latLng, { icon: icon, zIndexOffset: zIndex }).addTo(map);
-            userMarkers[username].bindPopup(`<strong>${username}</strong> ${username === mrXUsername ? '<span style="color:red;">(Mr. X)</span>' : ''}`);
+            // NEU: Popup mit generiertem Inhalt binden
+            userMarkers[username].bindPopup(popupContent);
             console.log(`Marker für ${username} erstellt.`);
         }
     }
@@ -340,12 +386,10 @@
     function reportFound() {
         const finderSelect = document.getElementById('finder-selection');
         const selectedFinder = finderSelect ? finderSelect.value : null;
-
         if (!selectedFinder) {
             alert("Bitte wähle aus, wer dich gefunden hat.");
             return;
         }
-
         console.log(`Melde: Gefunden von ${selectedFinder}`);
         if (window.socket && window.socket.connected) {
             window.socket.emit('mr_x_found', { finder: selectedFinder });
@@ -361,11 +405,8 @@
     function toggleDecoyPlacement() {
         if (!isMrX || !mrxDecoyAvailable) return;
         isPlacingDecoy = !isPlacingDecoy;
-        if (isPlacingDecoy) {
-            enterDecoyPlacementMode();
-        } else {
-            exitDecoyPlacementMode();
-        }
+        if (isPlacingDecoy) { enterDecoyPlacementMode(); }
+        else { exitDecoyPlacementMode(); }
     }
 
     function enterDecoyPlacementMode() {
@@ -391,17 +432,14 @@
 
     function handleMapClickForDecoy(e) {
         if (!isPlacingDecoy || !isMrX) return;
-
         const lat = e.latlng.lat;
         const lon = e.latlng.lng;
         console.log(`Decoy location selected: Lat=${lat}, Lon=${lon}`);
-
         if (tempDecoyMarker) map.removeLayer(tempDecoyMarker);
         tempDecoyMarker = L.marker([lat, lon], {
              icon: L.divIcon({ className: 'decoy-placement-marker', iconSize: [20, 20], iconAnchor: [10, 10] })
         }).addTo(map);
         tempDecoyMarker.bindPopup("Falscher Standort hier?").openPopup();
-
         if (window.socket && window.socket.connected) {
             window.socket.emit('set_decoy_location', { lat: lat, lon: lon });
         } else {
@@ -413,7 +451,6 @@
     function updateDecoyButtonState() {
         const decoyButton = document.getElementById('decoy-button');
         if (!decoyButton) return;
-
         decoyButton.classList.remove('placing');
         if (mrxDecoyAvailable) {
             decoyButton.disabled = false;
@@ -424,16 +461,13 @@
         }
     }
 
-
     // --- Hilfsfunktionen für Finder-Liste ---
     function updateFinderList(playerUsernames) {
          const finderSelect = document.getElementById('finder-selection');
          if (!finderSelect) return;
          console.log("Updating finder list with players:", playerUsernames);
          const currentSelection = finderSelect.value;
-         while (finderSelect.options.length > 1) {
-             finderSelect.remove(1);
-         }
+         while (finderSelect.options.length > 1) { finderSelect.remove(1); }
          playerUsernames.forEach(username => {
              if (username !== currentUsername) {
                  const option = document.createElement('option');
@@ -451,10 +485,7 @@
          console.log("Adding player to finder list:", username);
          let exists = false;
          for (let i = 0; i < finderSelect.options.length; i++) {
-             if (finderSelect.options[i].value === username) {
-                 exists = true;
-                 break;
-             }
+             if (finderSelect.options[i].value === username) { exists = true; break; }
          }
          if (!exists) {
              const option = document.createElement('option');
@@ -469,10 +500,7 @@
          if (!finderSelect) return;
          console.log("Removing player from finder list:", username);
          for (let i = 0; i < finderSelect.options.length; i++) {
-             if (finderSelect.options[i].value === username) {
-                 finderSelect.remove(i);
-                 break;
-             }
+             if (finderSelect.options[i].value === username) { finderSelect.remove(i); break; }
          }
      }
 
@@ -490,28 +518,13 @@
          messageDiv.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
          messageDiv.style.opacity = '1';
          messageDiv.style.transition = 'opacity 0.5s ease-out';
-
-         if (type === "error") {
-             messageDiv.style.backgroundColor = '#f8d7da';
-             messageDiv.style.color = '#721c24';
-             messageDiv.style.border = '1px solid #f5c6cb';
-         } else if (type === "warning") {
-             messageDiv.style.backgroundColor = '#fcf8e3';
-             messageDiv.style.color = '#8a6d3b';
-             messageDiv.style.border = '1px solid #faebcc';
-         } else { // info
-             messageDiv.style.backgroundColor = '#d9edf7';
-             messageDiv.style.color = '#31708f';
-             messageDiv.style.border = '1px solid #bce8f1';
-         }
-
+         if (type === "error") { messageDiv.style.backgroundColor = '#f8d7da'; messageDiv.style.color = '#721c24'; messageDiv.style.border = '1px solid #f5c6cb'; }
+         else if (type === "warning") { messageDiv.style.backgroundColor = '#fcf8e3'; messageDiv.style.color = '#8a6d3b'; messageDiv.style.border = '1px solid #faebcc'; }
+         else { messageDiv.style.backgroundColor = '#d9edf7'; messageDiv.style.color = '#31708f'; messageDiv.style.border = '1px solid #bce8f1'; }
          document.getElementById('map-container').appendChild(messageDiv);
-
          setTimeout(() => {
              messageDiv.style.opacity = '0';
-             setTimeout(() => {
-                 messageDiv.remove();
-             }, 500);
+             setTimeout(() => { messageDiv.remove(); }, 500);
          }, 3500);
      }
 
