@@ -1,4 +1,3 @@
-pyperclip
 Flask
 Flask-SocketIO
 simple-websocket

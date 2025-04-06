@@ -1,22 +1,37 @@
 import os
 import time
+import json # Importiere das json Modul
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
-# Importiere SocketIO und die kontextbezogene emit-Funktion
 from flask_socketio import SocketIO, emit
 from werkzeug.security import check_password_hash
-import threading # Wird für Timer benötigt, aber wir verwenden socketio.sleep
+import threading
 
-# Importiere nur das 'users' Dictionary
-from users import users
+# --- Lade Benutzerdaten aus JSON ---
+USERS_FILE = "users.json"
+loaded_users = {} # Standardmäßig leeres Dictionary
+
+try:
+    # Stelle sicher, dass der Pfad relativ zum Skriptverzeichnis ist
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    users_file_path = os.path.join(base_dir, USERS_FILE)
+    with open(users_file_path, 'r', encoding='utf-8') as f:
+        loaded_users = json.load(f)
+    print(f"Benutzerdaten erfolgreich aus {USERS_FILE} geladen.")
+except FileNotFoundError:
+    print(f"FEHLER: {USERS_FILE} nicht gefunden. Keine Benutzer geladen.")
+    # Hier könntest du entscheiden, ob die App trotzdem starten soll
+except json.JSONDecodeError:
+    print(f"FEHLER: Konnte JSON aus {USERS_FILE} nicht dekodieren. Bitte Format prüfen.")
+except Exception as e:
+    print(f"FEHLER: Unerwarteter Fehler beim Laden von {USERS_FILE}: {e}")
 
 # --- Konfiguration ---
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "sehr-geheim-fuer-spiel-ohne-bilder")
-# Verwende eventlet oder gevent für bessere Asynchronität
 socketio = SocketIO(app, async_mode="eventlet")
 
 # --- Konstante für Karenzzeit ---
-MRX_DISCONNECT_GRACE_PERIOD_SECONDS = 60 # 60 Sekunden warten
+MRX_DISCONNECT_GRACE_PERIOD_SECONDS = 60
 
 # --- Globaler Spielstatus ---
 game_state = {
@@ -25,36 +40,25 @@ game_state = {
     "update_interval_minutes": 5,
     "mr_x_last_broadcast_time": 0,
     "mr_x_last_known_location": None,
-    "players": {}, # {username: {'sid': ..., 'last_location': ...}}
-    # NEU: Status für Mr. X Disconnect Grace Period
-    "mrx_disconnect_task_pending": False # Flag, ob ein Task läuft
+    "players": {},
+    "mrx_disconnect_task_pending": False
 }
 
 # --- Hilfsfunktionen ---
 def end_game_due_to_mrx_disconnect():
     """Wird aufgerufen, wenn die Karenzzeit für Mr. X abläuft."""
-    # Prüfen, ob der Task überhaupt noch relevant ist (Flag)
-    # und ob das Spiel noch aktiv ist
     if game_state["mrx_disconnect_task_pending"] and game_state["active"]:
         print(f"Grace period for Mr. X ({game_state['mr_x']}) expired. Ending game.")
-        # Hier sicherstellen, dass Mr. X wirklich nicht wieder da ist
-        # (Obwohl das Flag in handle_connect zurückgesetzt werden sollte)
         if game_state['mr_x'] not in game_state['players']:
-             reset_game_state() # Spiel beenden (mit Benachrichtigung)
+             reset_game_state()
         else:
-             # Sollte nicht passieren, wenn handle_connect funktioniert
              print(f"Mr. X ({game_state['mr_x']}) reconnected just before grace period ended. Game continues.")
-    # Task ist beendet, Flag zurücksetzen
     game_state["mrx_disconnect_task_pending"] = False
 
 def reset_game_state(notify_clients=True):
     """Setzt den Spielstatus zurück."""
-    # Breche einen laufenden Mr. X Disconnect-Task ab, falls vorhanden
     if game_state["mrx_disconnect_task_pending"]:
         print("Cancelling pending Mr. X disconnect task due to game reset.")
-        # Da wir socketio.sleep verwenden, können wir den Task nicht direkt
-        # abbrechen. Das Flag 'mrx_disconnect_task_pending' wird aber
-        # in end_game_due_to_mrx_disconnect geprüft. Wir setzen es hier zurück.
         game_state["mrx_disconnect_task_pending"] = False
 
     print("Resetting game state.")
@@ -64,7 +68,6 @@ def reset_game_state(notify_clients=True):
     game_state["mr_x_last_broadcast_time"] = 0
     game_state["mr_x_last_known_location"] = None
     game_state["players"] = {}
-    # game_state["mrx_disconnect_task_pending"] = False # Schon oben erledigt
 
     if notify_clients:
         print("Notifying clients about game reset.")
@@ -77,15 +80,23 @@ def reset_game_state(notify_clients=True):
 
 @app.route("/")
 def index():
-    if not session.get("username"): return redirect(url_for("login"))
-    if game_state["active"]: return redirect(url_for("map_page"))
+    """Startseite: Zeigt Spielkonfiguration oder leitet zur Karte/Login weiter."""
+    if not session.get("username"):
+        return redirect(url_for("login"))
+
+    if game_state["active"]:
+        return redirect(url_for("map_page"))
     else:
-        registered_users = list(users.keys())
+        # Verwende loaded_users
+        registered_users = list(loaded_users.keys())
         return render_template("start.html", registered_users=registered_users)
 
 @app.route("/start_game", methods=["POST"])
 def start_game():
-    if "username" not in session: return redirect(url_for("login"))
+    """Nimmt die Spielkonfiguration entgegen und startet das Spiel."""
+    if "username" not in session:
+        return redirect(url_for("login"))
+
     if game_state["active"]:
         flash("Ein Spiel läuft bereits!", "warning")
         return redirect(url_for("map_page"))
@@ -93,12 +104,15 @@ def start_game():
     selected_mr_x = request.form.get("mr_x")
     interval_str = request.form.get("interval", "5")
 
-    if not selected_mr_x or selected_mr_x not in users:
+    # Verwende loaded_users
+    if not selected_mr_x or selected_mr_x not in loaded_users:
         flash("Bitte wähle einen gültigen Spieler als Mr. X aus.", "error")
         return redirect(url_for("index"))
+
     try:
         interval_minutes = int(interval_str)
-        if interval_minutes <= 0: raise ValueError("Interval must be positive")
+        if interval_minutes <= 0:
+            raise ValueError("Interval must be positive")
     except ValueError:
         flash("Bitte gib ein gültiges Update-Intervall (positive Zahl) an.", "error")
         return redirect(url_for("index"))
@@ -106,10 +120,10 @@ def start_game():
     game_state["active"] = True
     game_state["mr_x"] = selected_mr_x
     game_state["update_interval_minutes"] = interval_minutes
-    game_state["mr_x_last_broadcast_time"] = 0 # Für sofortiges erstes Update
+    game_state["mr_x_last_broadcast_time"] = 0
     game_state["mr_x_last_known_location"] = None
     game_state["players"] = {}
-    game_state["mrx_disconnect_task_pending"] = False # Sicherstellen, dass kein alter Task läuft
+    game_state["mrx_disconnect_task_pending"] = False
 
     print(f"Spiel gestartet! Mr. X: {selected_mr_x}, Interval: {interval_minutes} min")
     flash(f"Spiel gestartet! {selected_mr_x} ist Mr. X.", "success")
@@ -118,15 +132,18 @@ def start_game():
         'mr_x': game_state['mr_x'],
         'interval': game_state['update_interval_minutes']
     })
+
     return redirect(url_for("map_page"))
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    """Verarbeitet den Login."""
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
-        user_data = users.get(username)
+        # Verwende loaded_users
+        user_data = loaded_users.get(username)
         if user_data and check_password_hash(user_data["password"], password):
             session["username"] = username
             print(f"User '{username}' logged in.")
@@ -134,15 +151,21 @@ def login():
         else:
             flash("Ungültiger Benutzername oder Passwort", "error")
             return redirect(url_for("login"))
-    if "username" in session: return redirect(url_for("index"))
+
+    if "username" in session:
+        return redirect(url_for("index"))
+
     return render_template("login.html")
 
 @app.route("/map")
 def map_page():
-    if "username" not in session: return redirect(url_for("login"))
+    """Zeigt die Karte, aber nur wenn ein Spiel aktiv ist."""
+    if "username" not in session:
+        return redirect(url_for("login"))
     if not game_state["active"]:
         flash("Derzeit läuft kein Spiel.", "info")
         return redirect(url_for("index"))
+
     return render_template(
         "map.html",
         username=session["username"],
@@ -152,13 +175,13 @@ def map_page():
 
 @app.route("/logout")
 def logout():
+    """Meldet den Nutzer ab."""
     username = session.pop("username", None)
     if username:
         print(f"User '{username}' logged out.")
-        # Expliziter Logout von Mr. X beendet das Spiel weiterhin sofort
         if game_state["active"] and username == game_state["mr_x"]:
             print(f"Mr. X ({username}) explicitly logged out. Ending game.")
-            reset_game_state() # Ruft mit notify_clients=True (Standard) auf
+            reset_game_state()
     return redirect(url_for("login"))
 
 
@@ -176,20 +199,14 @@ def handle_connect():
         print(f"User {username} connected, but no game active.")
         return
 
-    # --- Spiel läuft ---
     print(f"User {username} joined active game.")
 
-    # NEU: Prüfen, ob Mr. X wiederkommt und Grace Period aktiv ist
     if username == game_state["mr_x"] and game_state["mrx_disconnect_task_pending"]:
         print(f"Mr. X ({username}) reconnected within grace period! Cancelling game end task.")
-        # Setze das Flag zurück, um den Hintergrund-Task zu stoppen
         game_state["mrx_disconnect_task_pending"] = False
-        # Der eigentliche Task läuft weiter, prüft aber das Flag und tut nichts
 
-    # Füge Spieler hinzu oder aktualisiere SID, falls schon vorhanden (Reconnect)
-    game_state["players"][username] = {"sid": sid, "last_location": game_state["players"].get(username, {}).get('last_location')} # Behalte alte Location bei Reconnect
+    game_state["players"][username] = {"sid": sid, "last_location": game_state["players"].get(username, {}).get('last_location')}
 
-    # Sende dem Client den aktuellen Spielstatus
     current_locations = {}
     for player, data in game_state["players"].items():
         loc = data.get('last_location')
@@ -207,7 +224,6 @@ def handle_connect():
         "players": list(game_state["players"].keys())
     })
 
-    # Informiere andere über (Wieder-)Beitritt
     socketio.emit("player_joined", {"username": username}, room=None, skip_sid=sid)
 
 
@@ -216,9 +232,6 @@ def handle_disconnect():
     """Wenn ein Client die Verbindung trennt."""
     username = None
     sid = request.sid
-    # Finde den User anhand der SID
-    # Wichtig: Entferne den Spieler noch NICHT aus game_state['players']
-    #          wenn es Mr. X ist und die Grace Period startet.
     disconnecting_user = None
     for user, data in game_state["players"].items():
         if data["sid"] == sid:
@@ -228,25 +241,18 @@ def handle_disconnect():
     if disconnecting_user:
         print(f"Client disconnected: {disconnecting_user} ({sid})")
         if game_state["active"]:
-            # Prüfe, ob Mr. X die Verbindung trennt
             if disconnecting_user == game_state["mr_x"]:
-                # Starte Grace Period nur, wenn nicht schon ein Task läuft
                 if not game_state["mrx_disconnect_task_pending"]:
                     print(f"Mr. X ({disconnecting_user}) disconnected. Starting grace period ({MRX_DISCONNECT_GRACE_PERIOD_SECONDS}s)...")
                     game_state["mrx_disconnect_task_pending"] = True
-                    # Starte Hintergrund-Task, der nach Ablauf der Zeit prüft
                     socketio.start_background_task(
                         target=end_game_due_to_mrx_disconnect_wrapper,
                         grace_period=MRX_DISCONNECT_GRACE_PERIOD_SECONDS
                     )
-                    # Entferne Mr. X vorerst NICHT aus game_state['players'],
-                    # damit er bei Reconnect gefunden wird.
-                    # Sende aber 'player_left', damit er von der Karte verschwindet.
                     socketio.emit("player_left", {"username": disconnecting_user})
                 else:
                     print(f"Mr. X ({disconnecting_user}) disconnected, but grace period task already pending.")
             else:
-                # Normaler Spieler trennt die Verbindung -> sofort entfernen
                 print(f"Player {disconnecting_user} disconnected. Removing.")
                 if disconnecting_user in game_state["players"]:
                      del game_state["players"][disconnecting_user]
@@ -271,7 +277,6 @@ def handle_location_update(data):
     """Empfängt Standort-Update und verteilt es gemäß Spielregeln."""
     if "username" not in session or not game_state["active"]: return
     username = session["username"]
-    # Prüfe, ob der User (noch) im Spiel ist (wichtig wegen Grace Period)
     if username not in game_state["players"]: return
 
     lat = data.get("lat")
@@ -304,26 +309,25 @@ def handle_mr_x_found(data):
     if username != game_state["mr_x"]: return
 
     finder = data.get("finder")
+    # Verwende loaded_users hier nicht, prüfe gegen game_state["players"]
     if not finder or finder not in game_state["players"]:
         emit('error_message', {'message': f"Ungültiger Finder '{finder}' ausgewählt."})
         return
 
     print(f"Mr. X ({username}) reported found by {finder}!")
 
-    # 1. Informiere alle Clients über das Spielende (mit spezifischer Nachricht)
     socketio.emit('game_over', {
         'message': f"Mr. X ({game_state['mr_x']}) wurde von {finder} gefunden!",
         'finder': finder,
         'mr_x': game_state['mr_x']
     })
 
-    # 2. Spielstatus zurücksetzen, OHNE erneut zu benachrichtigen
     reset_game_state(notify_clients=False)
 
 
 # --- App Start ---
 if __name__ == "__main__":
-    print("Starting Flask-SocketIO server for Mr. X Game (with grace period)...")
+    print("Starting Flask-SocketIO server for Mr. X Game (users from JSON)...")
     port = 1432
     host = "0.0.0.0"
     try:
