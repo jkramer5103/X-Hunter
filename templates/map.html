@@ -31,67 +31,13 @@
         #decoy-button { background-color: #f0ad4e; }
         #decoy-button:hover { background-color: #ec971f; }
         #decoy-button.placing { background-color: #5bc0de; }
-
-        /* Game Over Overlay */
-        #game-over-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            display: none;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            z-index: 1000;
-            font-size: 1.5em;
-        }
-         #game-over-overlay h2 {
-             margin-bottom: 20px;
-        }
-        #game-over-overlay button {
-            margin-top: 20px;
-            padding: 10px 20px;
-            font-size: 1em;
-            cursor: pointer;
-        }
-
-        /* Styles für DivIcon Marker */
-        .player-marker {
-            background-color: rgba(51, 136, 255, 0.8);
-            border: 2px solid white;
-            border-radius: 50%;
-            box-shadow: 0 0 5px rgba(0,0,0,0.5);
-            width: 15px;
-            height: 15px;
-        }
-        .own-player-marker {
-            background-color: rgba(0, 123, 255, 0.9);
-            border: 2px solid white;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            box-shadow: 0 0 6px rgba(0, 123, 255, 0.7);
-        }
-        .mrx-marker {
-            background-color: rgba(217, 83, 79, 0.9);
-            border: 2px solid white;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            box-shadow: 0 0 8px rgba(255, 0, 0, 0.8);
-        }
-        .decoy-placement-marker {
-            background-color: rgba(240, 173, 78, 0.7);
-            border: 2px dashed white;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-        }
-        /* Leere CSS-Regeln wurden entfernt oder hatten bereits Inhalt */
-
+        #game-over-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); color: white; display: none; justify-content: center; align-items: center; text-align: center; z-index: 1000; font-size: 1.5em; }
+        #game-over-overlay h2 { margin-bottom: 20px; }
+        #game-over-overlay button { margin-top: 20px; padding: 10px 20px; font-size: 1em; cursor: pointer; }
+        .player-marker { background-color: rgba(51, 136, 255, 0.8); border: 2px solid white; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5); width: 15px; height: 15px; }
+        .own-player-marker { background-color: rgba(0, 123, 255, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 6px rgba(0, 123, 255, 0.7); }
+        .mrx-marker { background-color: rgba(217, 83, 79, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 8px rgba(255, 0, 0, 0.8); }
+        .decoy-placement-marker { background-color: rgba(240, 173, 78, 0.7); border: 2px dashed white; border-radius: 50%; width: 20px; height: 20px; }
     </style>
 </head>
 <body>
@@ -146,21 +92,19 @@
     const mrXUsername = "{{ mr_x_username }}";
     let ownMarker = null;
     let isMrX = currentUsername === mrXUsername;
-    // KORREKTUR: Wert als String übergeben und in JS parsen
-    let mrxDecoyAvailable = "{{ mrx_decoy_available }}" === "True"; // Wandelt Python True -> "True" -> JS true
+    let mrxDecoyAvailable = "{{ mrx_decoy_available }}" === "True";
     let isPlacingDecoy = false;
     let tempDecoyMarker = null;
 
     // --- Initialisierung ---
     document.addEventListener('DOMContentLoaded', () => {
-        console.log("DOM geladen. Initialisiere Karte und SocketIO (mit Decoy).");
-        // Initialen Status des Decoy-Buttons setzen (falls Mr. X)
+        console.log("DOM geladen. Initialisiere Karte und SocketIO.");
         if (isMrX) {
             updateDecoyButtonState();
         }
         initializeMap();
         initializeSocketIO();
-        startLocationWatch();
+        startLocationWatch(); // Startet das Senden der Position für ALLE
 
         const foundButton = document.getElementById('found-button');
         if (foundButton) foundButton.addEventListener('click', reportFound);
@@ -197,11 +141,9 @@
             Object.keys(userMarkers).forEach(username => removeMarker(username));
             if (ownMarker) { map.removeLayer(ownMarker); ownMarker = null; }
 
-            // Robustheit: Prüfen ob locations vorhanden sind
             if (data.locations) {
                 for (const username in data.locations) {
                     const locData = data.locations[username];
-                    // Robustheit: Prüfen ob locData und Koordinaten vorhanden sind
                     if (locData && locData.lat !== undefined && locData.lon !== undefined) {
                         if (username === currentUsername) {
                             updateOwnMarker(locData.lat, locData.lon);
@@ -216,10 +158,7 @@
                 console.warn("game_update ohne Standortdaten empfangen.");
             }
 
-            // Robustheit: Standardwert für players setzen
             updateFinderList(data.players || []);
-
-            // Update Decoy Button Status bei Reconnect
             if (isMrX && data.mrx_decoy_available !== null && data.mrx_decoy_available !== undefined) {
                 mrxDecoyAvailable = data.mrx_decoy_available;
                 updateDecoyButtonState();
@@ -230,7 +169,6 @@
             if (data.previous_was_decoy) {
                 showTemporaryMessage(`Achtung! Der vorherige Standort von Mr. X (${mrXUsername}) war ein Ablenkungsmanöver!`, "warning");
             }
-            // Robustheit: Prüfen ob Koordinaten vorhanden sind
             if (data.lat !== undefined && data.lon !== undefined) {
                 if (data.username === currentUsername) {
                     updateOwnMarker(data.lat, data.lon);
@@ -308,7 +246,13 @@
             (position) => {
                 const lat = position.coords.latitude;
                 const lon = position.coords.longitude;
-                updateOwnMarker(lat, lon);
+
+                // Nur Nicht-MrX-Spieler aktualisieren ihren Marker sofort lokal.
+                if (!isMrX) {
+                    updateOwnMarker(lat, lon);
+                }
+
+                // Position IMMER an den Server senden (für alle Spieler)
                 if (window.socket && window.socket.connected) {
                     window.socket.emit('update_location', { lat: lat, lon: lon });
                 } else {
@@ -363,6 +307,7 @@
 
     function updateMarker(username, lat, lon) {
         if (username === currentUsername) {
+             // Dieser Fall sollte jetzt nur noch durch Server-Updates ausgelöst werden
              updateOwnMarker(lat, lon);
              return;
         }
@@ -406,6 +351,8 @@
             window.socket.emit('mr_x_found', { finder: selectedFinder });
             document.getElementById('found-button').disabled = true;
             finderSelect.disabled = true;
+             const decoyButton = document.getElementById('decoy-button');
+             if (decoyButton) decoyButton.disabled = true;
         } else {
             alert("Keine Verbindung zum Server. Konnte Fund nicht melden.");
         }
