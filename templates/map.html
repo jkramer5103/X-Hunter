@@ -49,12 +49,12 @@
         .mrx-marker { background-color: rgba(217, 83, 79, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 8px rgba(255, 0, 0, 0.8); }
         /* Mr. X Echtzeit-Marker */
         .mrx-realtime-marker {
-            background-color: rgb(81, 221, 0); /* Rot, etwas transparent */
+            background-color: rgb(81, 221, 0); /* Grün */
             border: 1px solid white;
             border-radius: 50%;
             width: 10px; /* Kleiner */
             height: 10px;
-            box-shadow: 0 0 3px rgba(255,0,0,0.6);
+            box-shadow: 0 0 3px rgb(62, 170, 0); /* Grüner Schatten */
         }
         .decoy-placement-marker { background-color: rgba(240, 173, 78, 0.7); border: 2px dashed white; border-radius: 50%; width: 20px; height: 20px; }
         .map-popup-button { padding: 5px 10px; margin-top: 8px; font-size: 0.9em; background-color: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; }
@@ -123,10 +123,12 @@
 <script>
     // --- Globale Variablen ---
     let map;
+    // Struktur für Marker-Daten
+    // userMarkers = { username: { marker: L.Marker, animation: { startPos: L.LatLng, targetPos: L.LatLng, startTime: timestamp, duration: ms, rafId: id } | null } }
     let userMarkers = {};
     const currentUsername = "{{ username }}";
     const mrXUsername = "{{ mr_x_username }}";
-    let ownMarker = null; // Repräsentiert die gesendete Position (für alle)
+    let ownMarkerData = null; // Hält { marker: L.Marker, animation: ... } für den eigenen gesendeten Marker
     let isMrX = currentUsername === mrXUsername;
     // Separater Marker für Mr. X Echtzeitposition
     let mrxRealTimeMarker = null;
@@ -146,6 +148,9 @@
     let invisibilityCountdownIntervalId = null;
     const invisibilityTimerElement = document.getElementById('invisibility-timer-display');
     const invisibilityTimerSpan = invisibilityTimerElement ? invisibilityTimerElement.querySelector('span') : null;
+    // Animation
+    const ANIMATION_DURATION_MS = 1500; // Dauer der Marker-Bewegung in Millisekunden
+    let animationFrameRequestId = null; // ID für den globalen Animationsloop
 
     // --- Initialisierung ---
     document.addEventListener('DOMContentLoaded', () => {
@@ -190,18 +195,20 @@
 
         socket.on('game_update', (data) => {
             console.log('Spielstatus-Update erhalten:', data);
+            // Alte Marker entfernen (inkl. Animationen stoppen)
             Object.keys(userMarkers).forEach(username => removeMarker(username));
-            if (ownMarker) { map.removeLayer(ownMarker); ownMarker = null; }
-            if (mrxRealTimeMarker) { map.removeLayer(mrxRealTimeMarker); mrxRealTimeMarker = null; } // Auch Echtzeit-Marker entfernen
+            if (ownMarkerData) { removeMarker(currentUsername); } // Eigene Daten entfernen
+            if (mrxRealTimeMarker) { map.removeLayer(mrxRealTimeMarker); mrxRealTimeMarker = null; }
 
             if (data.locations) {
                 for (const username in data.locations) {
                     const locData = data.locations[username];
                     if (locData && locData.lat !== undefined && locData.lon !== undefined) {
+                        // Marker direkt an Zielposition erstellen (keine Animation bei Init)
                         if (username === currentUsername) {
-                            updateOwnMarker(locData.lat, locData.lon); // Aktualisiert den 'gesendeten' Marker
+                            updateOwnMarker(locData.lat, locData.lon, true); // true = set immediately
                         } else {
-                            updateMarker(username, locData.lat, locData.lon);
+                            updateMarker(username, locData.lat, locData.lon, true); // true = set immediately
                         }
                     } else { console.warn(`Unvollständige Standortdaten für ${username} in game_update:`, locData); }
                 }
@@ -225,10 +232,11 @@
         socket.on('location_update', (data) => {
             if (data.previous_was_decoy) { showTemporaryMessage(`Achtung! Der vorherige Standort von Mr. X (${mrXUsername}) war ein Ablenkungsmanöver!`, "warning"); }
             if (data.lat !== undefined && data.lon !== undefined) {
+                // Starte Animation zur neuen Position
                 if (data.username === currentUsername) {
-                    updateOwnMarker(data.lat, data.lon); // Aktualisiert den 'gesendeten' Marker
+                    updateOwnMarker(data.lat, data.lon); // Ohne 'true' -> animiert
                 } else {
-                    updateMarker(data.username, data.lat, data.lon);
+                    updateMarker(data.username, data.lat, data.lon); // Ohne 'true' -> animiert
                 }
             } else { console.warn(`Unvollständige Standortdaten in location_update für ${data.username}:`, data); }
         });
@@ -293,7 +301,7 @@
              if (data.username !== currentUsername) {
                 console.log(`Player ${data.username} is visible again.`);
                 if (data.lat !== undefined && data.lon !== undefined && data.lat !== null) {
-                    updateMarker(data.username, data.lat, data.lon);
+                    updateMarker(data.username, data.lat, data.lon, true); // Direkt setzen, keine Animation
                     showTemporaryMessage(`${data.username} ist wieder sichtbar!`, 'info');
                 } else {
                      console.warn(`Player ${data.username} became visible but location is missing.`);
@@ -310,7 +318,8 @@
             if (isPlacingDecoy) { exitDecoyPlacementMode(); }
             stopTimer();
             stopInvisibilityCountdown();
-            if (mrxRealTimeMarker) { map.removeLayer(mrxRealTimeMarker); mrxRealTimeMarker = null; } // Echtzeit-Marker entfernen
+            if (mrxRealTimeMarker) { map.removeLayer(mrxRealTimeMarker); mrxRealTimeMarker = null; }
+            cancelAnimationFrame(animationFrameRequestId); animationFrameRequestId = null; // Animation stoppen
             const mrxActions = document.getElementById('mrx-actions');
             if (mrxActions) mrxActions.querySelectorAll('button, select').forEach(el => el.disabled = true);
             const seekerActions = document.getElementById('seeker-actions');
@@ -338,14 +347,11 @@
         locationWatchId = navigator.geolocation.watchPosition(
             (position) => {
                 const lat = position.coords.latitude; const lon = position.coords.longitude;
-                // Mr. X aktualisiert seinen Echtzeit-Marker
                 if (isMrX) {
-                    updateMrXRealTimeMarker(lat, lon);
+                    updateMrXRealTimeMarker(lat, lon); // Echtzeit-Marker sofort aktualisieren
                 } else {
-                // Sucher aktualisieren ihren normalen 'ownMarker'
-                    updateOwnMarker(lat, lon);
+                    updateOwnMarker(lat, lon); // Eigenen Marker animiert aktualisieren
                 }
-                // Position IMMER an den Server senden
                 if (window.socket && window.socket.connected) { window.socket.emit('update_location', { lat: lat, lon: lon }); }
                 else { console.warn("Socket nicht verbunden. Position konnte nicht gesendet werden."); }
             },
@@ -379,59 +385,108 @@
         return `${title}<br>${buttonHtml}`;
     }
 
-    // Aktualisiert den 'gesendeten' Marker für den aktuellen Benutzer
-    function updateOwnMarker(lat, lon) {
-        const latLng = [lat, lon];
+    // Aktualisiert den 'gesendeten' Marker für den aktuellen Benutzer (animiert)
+    function updateOwnMarker(lat, lon, setImmediately = false) {
+        const targetPos = L.latLng(lat, lon);
         const icon = createMarkerIcon(currentUsername);
         const popupContent = createPopupContent(currentUsername, lat, lon);
-        if (ownMarker) {
-            ownMarker.setLatLng(latLng);
-            if (ownMarker.options.icon.options.className !== icon.options.className) { ownMarker.setIcon(icon); }
-            ownMarker.setPopupContent(popupContent);
+
+        if (!ownMarkerData) {
+            const marker = L.marker(targetPos, { icon: icon, zIndexOffset: 1000 }).addTo(map);
+            marker.bindPopup(popupContent);
+            ownMarkerData = { marker: marker, animation: null };
         } else {
-            ownMarker = L.marker(latLng, { icon: icon, zIndexOffset: 1000 }).addTo(map);
-            ownMarker.bindPopup(popupContent);
+            ownMarkerData.marker.setIcon(icon);
+            ownMarkerData.marker.setPopupContent(popupContent);
+            if (setImmediately) {
+                 if (ownMarkerData.animation) { cancelAnimationFrame(ownMarkerData.animation.rafId); ownMarkerData.animation = null; }
+                 ownMarkerData.marker.setLatLng(targetPos);
+            } else { startMarkerAnimation(currentUsername, ownMarkerData, targetPos); }
         }
     }
 
-    // Aktualisiert den Echtzeit-Marker für Mr. X
+    // Aktualisiert den Echtzeit-Marker für Mr. X (sofort)
     function updateMrXRealTimeMarker(lat, lon) {
         if (!isMrX) return;
-        const latLng = [lat, lon];
+        const latLng = L.latLng(lat, lon);
         const icon = L.divIcon({ className: 'mrx-realtime-marker', iconSize: [10, 10], iconAnchor: [5, 5] });
-        // const popupContent = "<strong>Deine ECHTE Position</strong><br>(Nur für dich sichtbar)"; // Popup optional
         if (mrxRealTimeMarker) {
             mrxRealTimeMarker.setLatLng(latLng);
         } else {
             mrxRealTimeMarker = L.marker(latLng, { icon: icon, zIndexOffset: 1100, interactive: false }).addTo(map);
-            // mrxRealTimeMarker.bindPopup(popupContent); // Optional Popup binden
         }
     }
 
-    // Aktualisiert Marker für ANDERE Spieler
-    function updateMarker(username, lat, lon) {
-        if (username === currentUsername) { updateOwnMarker(lat, lon); return; } // Sollte nicht passieren
-        const latLng = [lat, lon];
+    // Aktualisiert Marker für ANDERE Spieler (animiert)
+    function updateMarker(username, lat, lon, setImmediately = false) {
+        if (username === currentUsername) { updateOwnMarker(lat, lon, setImmediately); return; }
+        const targetPos = L.latLng(lat, lon);
         const icon = createMarkerIcon(username);
         const popupContent = createPopupContent(username, lat, lon);
-        if (userMarkers[username]) {
-            userMarkers[username].setLatLng(latLng);
-             if (userMarkers[username].options.icon.options.className !== icon.options.className) { userMarkers[username].setIcon(icon); }
-             userMarkers[username].setPopupContent(popupContent);
-        } else {
+
+        if (!userMarkers[username]) {
             const zIndex = (username === mrXUsername) ? 900 : 500;
-            userMarkers[username] = L.marker(latLng, { icon: icon, zIndexOffset: zIndex }).addTo(map);
-            userMarkers[username].bindPopup(popupContent);
+            const marker = L.marker(targetPos, { icon: icon, zIndexOffset: zIndex }).addTo(map);
+            marker.bindPopup(popupContent);
+            userMarkers[username] = { marker: marker, animation: null };
             console.log(`Marker für ${username} erstellt.`);
+        } else {
+            userMarkers[username].marker.setIcon(icon);
+            userMarkers[username].marker.setPopupContent(popupContent);
+             if (setImmediately) {
+                 if (userMarkers[username].animation) { cancelAnimationFrame(userMarkers[username].animation.rafId); userMarkers[username].animation = null; }
+                 userMarkers[username].marker.setLatLng(targetPos);
+            } else { startMarkerAnimation(username, userMarkers[username], targetPos); }
         }
     }
 
     function removeMarker(username) {
-        if (userMarkers[username]) {
-            map.removeLayer(userMarkers[username]);
-            delete userMarkers[username];
+        const markerData = (username === currentUsername) ? ownMarkerData : userMarkers[username];
+        if (markerData) {
+            if (markerData.animation) { cancelAnimationFrame(markerData.animation.rafId); markerData.animation = null; }
+            map.removeLayer(markerData.marker);
             console.log(`Marker für ${username} entfernt.`);
         }
+        if (username === currentUsername) { ownMarkerData = null; }
+        else { delete userMarkers[username]; }
+    }
+
+    // --- Animationslogik ---
+    function startMarkerAnimation(username, markerData, targetPos) {
+        const marker = markerData.marker;
+        const startPos = marker.getLatLng();
+        const startTime = Date.now();
+        if (markerData.animation) { cancelAnimationFrame(markerData.animation.rafId); }
+        markerData.animation = { startPos: startPos, targetPos: targetPos, startTime: startTime, duration: ANIMATION_DURATION_MS, rafId: null };
+        if (!animationFrameRequestId) { animationFrameRequestId = requestAnimationFrame(animateMarkers); }
+    }
+
+    function animateMarkers(timestamp) {
+        let stillAnimating = false;
+        const now = Date.now();
+        if (ownMarkerData && ownMarkerData.animation) {
+            if (animateSingleMarker(ownMarkerData, now)) { stillAnimating = true; }
+            else { ownMarkerData.animation = null; }
+        }
+        for (const username in userMarkers) {
+            const markerData = userMarkers[username];
+            if (markerData.animation) {
+                if (animateSingleMarker(markerData, now)) { stillAnimating = true; }
+                else { markerData.animation = null; }
+            }
+        }
+        if (stillAnimating) { animationFrameRequestId = requestAnimationFrame(animateMarkers); }
+        else { animationFrameRequestId = null; console.log("Animation loop stopped."); }
+    }
+
+    function animateSingleMarker(markerData, now) {
+        const anim = markerData.animation;
+        const elapsedTime = now - anim.startTime;
+        const fraction = Math.min(1, elapsedTime / anim.duration);
+        const lat = anim.startPos.lat + (anim.targetPos.lat - anim.startPos.lat) * fraction;
+        const lng = anim.startPos.lng + (anim.targetPos.lng - anim.startPos.lng) * fraction;
+        markerData.marker.setLatLng([lat, lng]);
+        return fraction < 1;
     }
 
     // --- Mr. X Aktionen ---
