@@ -290,7 +290,7 @@
             console.log(`Spieler gegangen: ${data.username}`);
             removeMarker(data.username);
             removePlayerFromFinderList(data.username);
-            showTemporaryMessage(`${data.username} hat das Spiel verlassen.`, "warning");
+            showTemporaryMessage(`${data.username} hat die Verbindung verloren.`, "warning");
         });
 
         socket.on('decoy_set_confirmation', (data) => {
