@@ -5,7 +5,7 @@ from functools import wraps # Für den Decorator benötigt
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from flask_socketio import SocketIO, emit
 from werkzeug.security import check_password_hash, generate_password_hash
-import threading
+import threading # Wird für Timer benötigt, aber wir verwenden socketio.sleep
 
 # --- Lade/Speichere Benutzerdaten ---
 USERS_FILE = "users.json"
@@ -17,6 +17,7 @@ def load_users_from_json():
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         users_file_path = os.path.join(base_dir, USERS_FILE)
+        # Erstelle die Datei mit einem leeren Objekt, falls sie nicht existiert
         if not os.path.exists(users_file_path):
             with open(users_file_path, 'w', encoding='utf-8') as f:
                 # Erstelle initialen Admin, wenn Datei neu ist
@@ -38,17 +39,19 @@ def load_users_from_json():
         print(f"Benutzerdaten erfolgreich aus {USERS_FILE} geladen.")
     except json.JSONDecodeError:
         print(f"FEHLER: Konnte JSON aus {USERS_FILE} nicht dekodieren. Bitte Format prüfen.")
-        loaded_users = {}
+        loaded_users = {} # Mit leerem Dict starten bei Fehler
     except Exception as e:
         print(f"FEHLER: Unerwarteter Fehler beim Laden von {USERS_FILE}: {e}")
-        loaded_users = {}
+        loaded_users = {} # Mit leerem Dict starten bei Fehler
 
+# NEU: Funktion zum Speichern der Benutzerdaten
 def save_users_to_json():
     """Speichert das aktuelle loaded_users Dictionary in die JSON-Datei."""
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         users_file_path = os.path.join(base_dir, USERS_FILE)
         with open(users_file_path, 'w', encoding='utf-8') as f:
+            # Schreibe JSON lesbar formatiert (indent=2)
             json.dump(loaded_users, f, indent=2)
         print(f"Benutzerdaten erfolgreich in {USERS_FILE} gespeichert.")
         return True
@@ -61,7 +64,7 @@ load_users_from_json()
 
 # --- Konfiguration ---
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "sehr-geheim-fuer-spiel-mit-admin")
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "sehr-geheim-fuer-spiel-mit-timer")
 socketio = SocketIO(app, async_mode="eventlet")
 
 # --- Konstante für Karenzzeit ---
@@ -72,7 +75,7 @@ game_state = {
     "active": False,
     "mr_x": None,
     "update_interval_minutes": 5,
-    "mr_x_last_broadcast_time": 0,
+    "mr_x_last_broadcast_time": 0, # Unix Timestamp (Sekunden)
     "mr_x_last_known_location": None,
     "players": {},
     "mrx_disconnect_task_pending": False,
@@ -83,7 +86,7 @@ game_state = {
 
 # --- Hilfsfunktionen & Decorator ---
 
-# NEU: Decorator für Admin-Zugriff
+# Decorator für Admin-Zugriff
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -92,7 +95,6 @@ def admin_required(f):
             return redirect(url_for('login'))
         username = session['username']
         user_data = loaded_users.get(username)
-        # Prüfe, ob User existiert und 'is_admin' True ist (verwende .get für Sicherheit)
         if not user_data or not user_data.get('is_admin', False):
             flash("Zugriff verweigert. Nur Administratoren erlaubt.", "danger")
             return redirect(url_for('index'))
@@ -100,6 +102,7 @@ def admin_required(f):
     return decorated_function
 
 def end_game_due_to_mrx_disconnect():
+    """Wird aufgerufen, wenn die Karenzzeit für Mr. X abläuft."""
     if game_state["mrx_disconnect_task_pending"] and game_state["active"]:
         print(f"Grace period for Mr. X ({game_state['mr_x']}) expired. Ending game.")
         if game_state['mr_x'] not in game_state['players']:
@@ -109,6 +112,7 @@ def end_game_due_to_mrx_disconnect():
     game_state["mrx_disconnect_task_pending"] = False
 
 def reset_game_state(notify_clients=True):
+    """Setzt den Spielstatus zurück."""
     if game_state["mrx_disconnect_task_pending"]:
         print("Cancelling pending Mr. X disconnect task due to game reset.")
         game_state["mrx_disconnect_task_pending"] = False
@@ -140,31 +144,22 @@ def index():
         return render_template("start.html", registered_users=registered_users, is_admin=is_admin)
 
 @app.route("/start_game", methods=["POST"])
-@admin_required # <-- *** NEU: Decorator hier hinzufügen ***
+@admin_required
 def start_game():
-    """Nimmt die Spielkonfiguration entgegen und startet das Spiel (nur Admins)."""
-    # Die @admin_required Prüfung stellt sicher, dass nur Admins hierher kommen.
-    # Der 'username' in session ist also sicher vorhanden und ein Admin.
-
     if game_state["active"]:
         flash("Ein Spiel läuft bereits!", "warning")
-        # Admins sollten zur Karte geleitet werden, wenn Spiel schon läuft
         return redirect(url_for("map_page"))
-
     selected_mr_x = request.form.get("mr_x")
     interval_str = request.form.get("interval", "5")
-
     if not selected_mr_x or selected_mr_x not in loaded_users:
         flash("Bitte wähle einen gültigen Spieler als Mr. X aus.", "error")
-        return redirect(url_for("index")) # Zurück zur Startseite (wo der Admin das Formular sieht)
+        return redirect(url_for("index"))
     try:
         interval_minutes = int(interval_str)
         if interval_minutes <= 0: raise ValueError("Interval must be positive")
     except ValueError:
         flash("Bitte gib ein gültiges Update-Intervall (positive Zahl) an.", "error")
         return redirect(url_for("index"))
-
-    # Explizite Initialisierung aller Werte für das neue Spiel:
     game_state["active"] = True
     game_state["mr_x"] = selected_mr_x
     game_state["update_interval_minutes"] = interval_minutes
@@ -175,15 +170,12 @@ def start_game():
     game_state["mrx_decoy_available"] = True
     game_state["mrx_pending_decoy_location"] = None
     game_state["mrx_last_update_was_decoy"] = False
-
     print(f"Spiel gestartet! Mr. X: {selected_mr_x}, Interval: {interval_minutes} min")
     flash(f"Spiel gestartet! {selected_mr_x} ist Mr. X.", "success")
-
     socketio.emit('game_started', {
         'mr_x': game_state['mr_x'],
         'interval': game_state['update_interval_minutes']
     })
-    # Leite den Admin zur Karte weiter
     return redirect(url_for("map_page"))
 
 @app.route("/login", methods=["GET", "POST"])
@@ -192,7 +184,7 @@ def login():
         username = request.form.get("username")
         password = request.form.get("password")
         user_data = loaded_users.get(username)
-        if user_data and check_password_hash(user_data.get("password", ""), password): # .get für Sicherheit
+        if user_data and check_password_hash(user_data.get("password", ""), password):
             session["username"] = username
             print(f"User '{username}' logged in.")
             return redirect(url_for("index"))
@@ -208,7 +200,6 @@ def map_page():
     if not game_state["active"]:
         flash("Derzeit läuft kein Spiel.", "info")
         return redirect(url_for("index"))
-    # Übergebe Admin-Status an map.html, falls benötigt (hier nicht direkt, aber gut zu wissen)
     is_admin = loaded_users.get(session['username'], {}).get('is_admin', False)
     return render_template(
         "map.html",
@@ -216,7 +207,7 @@ def map_page():
         mr_x_username=game_state["mr_x"],
         current_players_list=[p for p in game_state["players"] if p != session["username"]],
         mrx_decoy_available=game_state["mrx_decoy_available"],
-        is_admin=is_admin # Admin-Status übergeben
+        is_admin=is_admin
     )
 
 @app.route("/logout")
@@ -229,64 +220,38 @@ def logout():
             reset_game_state()
     return redirect(url_for("login"))
 
-# --- Benutzerverwaltung (nur für Admins) ---
 @app.route('/manage_users', methods=['GET', 'POST'])
-@admin_required # NEU: Decorator anwenden
+@admin_required
 def manage_users():
-    """Seite zum Hinzufügen und Löschen von Benutzern und Verwalten von Admins."""
-    current_admin_username = session['username'] # Der eingeloggte Admin
-
+    current_admin_username = session['username']
     if request.method == 'POST':
         action = request.form.get('action')
-
-        # --- Benutzer HINZUFÜGEN ---
         if action == 'add':
             new_username = request.form.get('new_username')
             new_password = request.form.get('new_password')
-            # Checkbox für Admin-Status beim Hinzufügen
             is_new_admin = request.form.get('is_new_admin') == 'on'
-
-            if not new_username or not new_password:
-                flash("Benutzername und Passwort dürfen nicht leer sein.", "error")
-            elif new_username in loaded_users:
-                flash(f"Benutzername '{new_username}' existiert bereits.", "error")
+            if not new_username or not new_password: flash("Benutzername und Passwort dürfen nicht leer sein.", "error")
+            elif new_username in loaded_users: flash(f"Benutzername '{new_username}' existiert bereits.", "error")
             else:
                 hashed_password = generate_password_hash(new_password)
-                loaded_users[new_username] = {
-                    "password": hashed_password,
-                    "is_admin": is_new_admin # Admin-Status speichern
-                }
-                if save_users_to_json():
-                    flash(f"Benutzer '{new_username}' {'als Admin ' if is_new_admin else ''}erfolgreich hinzugefügt.", "success")
-                    print(f"User added: {new_username} (Admin: {is_new_admin})")
-                else:
-                    flash("Fehler beim Speichern der Benutzerdaten.", "error")
-                    if new_username in loaded_users: del loaded_users[new_username]
+                loaded_users[new_username] = { "password": hashed_password, "is_admin": is_new_admin }
+                if save_users_to_json(): flash(f"Benutzer '{new_username}' {'als Admin ' if is_new_admin else ''}erfolgreich hinzugefügt.", "success"); print(f"User added: {new_username} (Admin: {is_new_admin})")
+                else: flash("Fehler beim Speichern der Benutzerdaten.", "error"); del loaded_users[new_username]
             return redirect(url_for('manage_users'))
-
-        # --- Benutzer LÖSCHEN ---
         elif action == 'delete':
             username_to_delete = request.form.get('username_to_delete')
             if not username_to_delete: flash("Kein Benutzer zum Löschen ausgewählt.", "error")
             elif username_to_delete not in loaded_users: flash(f"Benutzer '{username_to_delete}' nicht gefunden.", "error")
             elif username_to_delete == current_admin_username: flash("Du kannst dich nicht selbst löschen.", "error")
-            # Zähle Admins VOR dem Löschen
-            admin_count = sum(1 for u in loaded_users.values() if u.get('is_admin'))
-            is_deleting_admin = loaded_users[username_to_delete].get('is_admin', False)
-            # Verhindere Löschen des letzten Admins
-            if is_deleting_admin and admin_count <= 1:
-                 flash("Der letzte Administrator kann nicht gelöscht werden.", "error")
             else:
-                del loaded_users[username_to_delete]
-                if save_users_to_json():
-                    flash(f"Benutzer '{username_to_delete}' erfolgreich gelöscht.", "success")
-                    print(f"User deleted: {username_to_delete}")
+                admin_count = sum(1 for u in loaded_users.values() if u.get('is_admin'))
+                is_deleting_admin = loaded_users[username_to_delete].get('is_admin', False)
+                if is_deleting_admin and admin_count <= 1: flash("Der letzte Administrator kann nicht gelöscht werden.", "error")
                 else:
-                    flash("Fehler beim Speichern nach dem Löschen.", "error")
-                    load_users_from_json() # Lade letzten Stand neu
+                    del loaded_users[username_to_delete]
+                    if save_users_to_json(): flash(f"Benutzer '{username_to_delete}' erfolgreich gelöscht.", "success"); print(f"User deleted: {username_to_delete}")
+                    else: flash("Fehler beim Speichern nach dem Löschen.", "error"); load_users_from_json()
             return redirect(url_for('manage_users'))
-
-        # --- Admin-Recht VERGEBEN ---
         elif action == 'grant_admin':
             username_to_grant = request.form.get('username_to_modify')
             if not username_to_grant: flash("Kein Benutzer ausgewählt.", "error")
@@ -294,15 +259,9 @@ def manage_users():
             elif loaded_users[username_to_grant].get('is_admin', False): flash(f"Benutzer '{username_to_grant}' ist bereits Admin.", "warning")
             else:
                 loaded_users[username_to_grant]['is_admin'] = True
-                if save_users_to_json():
-                    flash(f"'{username_to_grant}' wurden Admin-Rechte erteilt.", "success")
-                    print(f"Admin granted: {username_to_grant}")
-                else:
-                    flash("Fehler beim Speichern der Admin-Rechte.", "error")
-                    loaded_users[username_to_grant]['is_admin'] = False # Änderung rückgängig
+                if save_users_to_json(): flash(f"'{username_to_grant}' wurden Admin-Rechte erteilt.", "success"); print(f"Admin granted: {username_to_grant}")
+                else: flash("Fehler beim Speichern der Admin-Rechte.", "error"); loaded_users[username_to_grant]['is_admin'] = False
             return redirect(url_for('manage_users'))
-
-        # --- Admin-Recht ENTZIEHEN ---
         elif action == 'revoke_admin':
             username_to_revoke = request.form.get('username_to_modify')
             if not username_to_revoke: flash("Kein Benutzer ausgewählt.", "error")
@@ -310,37 +269,20 @@ def manage_users():
             elif not loaded_users[username_to_revoke].get('is_admin', False): flash(f"Benutzer '{username_to_revoke}' ist kein Admin.", "warning")
             elif username_to_revoke == current_admin_username: flash("Du kannst dir nicht selbst die Admin-Rechte entziehen.", "error")
             else:
-                # Zähle Admins VOR dem Entziehen
                 admin_count = sum(1 for u in loaded_users.values() if u.get('is_admin'))
-                if admin_count <= 1:
-                     flash("Dem letzten Administrator können die Rechte nicht entzogen werden.", "error")
+                if admin_count <= 1: flash("Dem letzten Administrator können die Rechte nicht entzogen werden.", "error")
                 else:
                     loaded_users[username_to_revoke]['is_admin'] = False
-                    if save_users_to_json():
-                        flash(f"'{username_to_revoke}' wurden die Admin-Rechte entzogen.", "success")
-                        print(f"Admin revoked: {username_to_revoke}")
-                    else:
-                        flash("Fehler beim Speichern nach Entzug der Admin-Rechte.", "error")
-                        loaded_users[username_to_revoke]['is_admin'] = True # Änderung rückgängig
+                    if save_users_to_json(): flash(f"'{username_to_revoke}' wurden die Admin-Rechte entzogen.", "success"); print(f"Admin revoked: {username_to_revoke}")
+                    else: flash("Fehler beim Speichern nach Entzug der Admin-Rechte.", "error"); loaded_users[username_to_revoke]['is_admin'] = True
             return redirect(url_for('manage_users'))
-
-    # --- GET Request ---
-    # Übergebe die Benutzerdaten (inkl. Admin-Status) an das Template
-    # Konvertiere das Dictionary in eine Liste von Dictionaries für einfachere Iteration im Template
     users_list_with_status = []
     for username, data in loaded_users.items():
-        # Füge den eingeloggten Admin nicht zur Liste für Aktionen hinzu
         if username != current_admin_username:
-            users_list_with_status.append({
-                'username': username,
-                'is_admin': data.get('is_admin', False)
-            })
-
+            users_list_with_status.append({ 'username': username, 'is_admin': data.get('is_admin', False) })
     return render_template('manage_users.html', users_list=users_list_with_status)
 
-
 # --- SocketIO Events ---
-# (Keine Änderungen hier nötig)
 @socketio.on("connect")
 def handle_connect():
     if "username" not in session: return False
@@ -365,11 +307,15 @@ def handle_connect():
                  "lat": game_state["mr_x_last_known_location"]["lat"],
                  "lon": game_state["mr_x_last_known_location"]["lon"]
              }
+    # Sende jetzt auch Timer-Infos mit game_update
     emit("game_update", {
         "mr_x": game_state["mr_x"],
         "locations": current_locations,
         "players": list(game_state["players"].keys()),
-        "mrx_decoy_available": game_state["mrx_decoy_available"] if username == game_state["mr_x"] else None
+        "mrx_decoy_available": game_state["mrx_decoy_available"] if username == game_state["mr_x"] else None,
+        # Timer-Daten senden
+        "mrx_update_interval_minutes": game_state["update_interval_minutes"],
+        "mrx_last_broadcast_time": game_state["mr_x_last_broadcast_time"] # Sende als Unix-Timestamp (Sekunden)
     })
     socketio.emit("player_joined", {"username": username}, room=None, skip_sid=sid)
 
@@ -453,7 +399,10 @@ def handle_location_update(data):
                 "previous_was_decoy": announce_previous_decoy
             }
             socketio.emit("location_update", update_data)
-            game_state["mr_x_last_broadcast_time"] = now
+            new_broadcast_time = now
+            game_state["mr_x_last_broadcast_time"] = new_broadcast_time
+            # Sende separates Event, um den Timer bei allen Clients zurückzusetzen
+            socketio.emit("mrx_update_timer", {"last_broadcast_time": new_broadcast_time})
     else:
         update_data = {"username": username, "lat": lat, "lon": lon}
         socketio.emit("location_update", update_data, room=None, skip_sid=sid)
@@ -495,7 +444,7 @@ def handle_mr_x_found(data):
 
 # --- App Start ---
 if __name__ == "__main__":
-    print("Starting Flask-SocketIO server for Mr. X Game (with admin)...")
+    print("Starting Flask-SocketIO server for Mr. X Game (with timer)...")
     port = 1432
     host = "0.0.0.0"
     try:
@@ -507,4 +456,3 @@ if __name__ == "__main__":
     except OSError as e:
          if "address already in use" in str(e).lower(): print(f"\n--- FEHLER --- Port {port} wird bereits verwendet.")
          else: print(f"Ein Fehler ist aufgetreten: {e}")
-

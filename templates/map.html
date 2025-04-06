@@ -16,12 +16,13 @@
         #map-container { flex-grow: 1; position: relative; min-height: 0; }
         #map { height: 100%; width: 100%; cursor: default; }
         #map.decoy-placement-active { cursor: crosshair !important; }
-        #header { padding: 8px 15px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        #header { padding: 8px 15px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; flex-wrap: wrap; gap: 10px; }
         #header .user-info span { margin-right: 15px; }
         #header .user-info strong { color: #007bff; }
         #header .game-info { font-weight: bold; }
         #header .game-info .mrx { color: #d9534f; }
         #header a { text-decoration: none; color: #007bff; margin-left: 10px; }
+        #timer-info { font-weight: bold; color: #555; background-color: #e9ecef; padding: 5px 10px; border-radius: 4px; }
         #mrx-actions { display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 10px; text-align: center; padding: 10px; background-color: #f8d7da; border-top: 1px solid #f5c6cb; flex-shrink: 0; }
         #mrx-actions button { padding: 8px 15px; background-color: #d9534f; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
         #mrx-actions button:hover { background-color: #c9302c; }
@@ -38,26 +39,9 @@
         .own-player-marker { background-color: rgba(0, 123, 255, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 6px rgba(0, 123, 255, 0.7); }
         .mrx-marker { background-color: rgba(217, 83, 79, 0.9); border: 2px solid white; width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 8px rgba(255, 0, 0, 0.8); }
         .decoy-placement-marker { background-color: rgba(240, 173, 78, 0.7); border: 2px dashed white; border-radius: 50%; width: 20px; height: 20px; }
-
-        /* NEU: Style für den Button im Popup */
-        .map-popup-button {
-            padding: 5px 10px;
-            margin-top: 8px; /* Abstand zum Namen */
-            font-size: 0.9em;
-            background-color: #6c757d; /* Grau */
-            color: white;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        .map-popup-button:hover {
-            background-color: #5a6268;
-        }
-        /* Optional: Verhindern, dass der Popup zu breit wird */
-        .leaflet-popup-content {
-             min-width: 130px; /* Mindestbreite für den Button */
-             text-align: center; /* Zentriert den Button */
-        }
+        .map-popup-button { padding: 5px 10px; margin-top: 8px; font-size: 0.9em; background-color: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        .map-popup-button:hover { background-color: #5a6268; }
+        .leaflet-popup-content { min-width: 130px; text-align: center; }
     </style>
 </head>
 <body>
@@ -69,6 +53,10 @@
             Spiel aktiv! Mr. X: <span class="mrx">{{ mr_x_username }}</span>
             {% if username == mr_x_username %}(Du bist Mr. X){% endif %}
         </span>
+    </div>
+    <!-- Timer Anzeige -->
+    <div id="timer-info">
+        Nächstes Mr. X Update in: <span id="mrx-timer-display">--:--</span>
     </div>
     <div>
         <a href="{{ url_for('logout') }}">Logout</a>
@@ -115,6 +103,11 @@
     let mrxDecoyAvailable = "{{ mrx_decoy_available }}" === "True";
     let isPlacingDecoy = false;
     let tempDecoyMarker = null;
+    // Timer Variablen
+    let mrxUpdateIntervalSeconds = 0;
+    let mrxLastBroadcastTimestampMs = 0;
+    let timerIntervalId = null;
+    const timerDisplayElement = document.getElementById('mrx-timer-display');
 
     // --- Initialisierung ---
     document.addEventListener('DOMContentLoaded', () => {
@@ -153,7 +146,10 @@
         window.socket = socket;
 
         socket.on('connect', () => console.log('Verbunden mit WebSocket-Server (Karte).'));
-        socket.on('disconnect', (reason) => console.warn('WebSocket-Verbindung getrennt:', reason));
+        socket.on('disconnect', (reason) => {
+            console.warn('WebSocket-Verbindung getrennt:', reason);
+            stopTimer();
+        });
         socket.on('connect_error', (err) => console.error('WebSocket Verbindungsfehler:', err));
 
         socket.on('game_update', (data) => {
@@ -182,6 +178,17 @@
             if (isMrX && data.mrx_decoy_available !== null && data.mrx_decoy_available !== undefined) {
                 mrxDecoyAvailable = data.mrx_decoy_available;
                 updateDecoyButtonState();
+            }
+
+            // Timer initialisieren/starten
+            if (data.mrx_update_interval_minutes && data.mrx_last_broadcast_time !== undefined) {
+                mrxUpdateIntervalSeconds = data.mrx_update_interval_minutes * 60;
+                mrxLastBroadcastTimestampMs = data.mrx_last_broadcast_time * 1000;
+                console.log(`Timer init: Interval=${mrxUpdateIntervalSeconds}s, LastBroadcast=${new Date(mrxLastBroadcastTimestampMs).toLocaleTimeString()}`);
+                startTimer();
+            } else {
+                console.warn("Timer-Daten in game_update fehlen.");
+                timerDisplayElement.textContent = "N/A";
             }
         });
 
@@ -224,25 +231,30 @@
             }
         });
 
+        // Listener für Timer-Reset
+        socket.on('mrx_update_timer', (data) => {
+            if (data.last_broadcast_time !== undefined) {
+                mrxLastBroadcastTimestampMs = data.last_broadcast_time * 1000;
+                console.log(`Timer reset: LastBroadcast=${new Date(mrxLastBroadcastTimestampMs).toLocaleTimeString()}`);
+                updateTimerDisplay(); // Timer sofort aktualisieren
+            } else {
+                console.warn("mrx_update_timer Event ohne Zeitstempel empfangen.");
+            }
+        });
+
         socket.on('game_over', (data) => {
             console.log("Spiel vorbei!", data);
             document.getElementById('game-over-message').innerText = data.message;
             document.getElementById('game-over-overlay').style.display = 'flex';
-            if (locationWatchId) {
-                navigator.geolocation.clearWatch(locationWatchId);
-                locationWatchId = null;
-            }
-            if (isPlacingDecoy) {
-                exitDecoyPlacementMode();
-            }
+            if (locationWatchId) { navigator.geolocation.clearWatch(locationWatchId); locationWatchId = null; }
+            if (isPlacingDecoy) { exitDecoyPlacementMode(); }
+            stopTimer();
         });
 
         socket.on('redirect', (data) => {
             console.log('Redirect empfangen:', data.url);
             showTemporaryMessage("Kein Spiel aktiv. Leite zur Startseite weiter...", "info");
-            setTimeout(() => {
-                 window.location.href = data.url;
-            }, 2000);
+            setTimeout(() => { window.location.href = data.url; }, 2000);
         });
 
         socket.on('error_message', (data) => {
@@ -266,12 +278,10 @@
             (position) => {
                 const lat = position.coords.latitude;
                 const lon = position.coords.longitude;
-
                 // Nur Nicht-MrX-Spieler aktualisieren ihren Marker sofort lokal.
                 if (!isMrX) {
                     updateOwnMarker(lat, lon);
                 }
-
                 // Position IMMER an den Server senden (für alle Spieler)
                 if (window.socket && window.socket.connected) {
                     window.socket.emit('update_location', { lat: lat, lon: lon });
@@ -292,83 +302,46 @@
         const isUserMrX = username === mrXUsername;
         let className = 'player-marker';
         let iconSize = [15, 15];
-
-        if (isOwn) {
-            className = 'player-marker own-player-marker';
-            iconSize = [18, 18];
-        }
-        if (isUserMrX) {
-             className = 'player-marker mrx-marker';
-             iconSize = [18, 18];
-        }
-
-        return L.divIcon({
-            className: className,
-            iconSize: iconSize,
-            iconAnchor: [iconSize[0] / 2, iconSize[1] / 2],
-            popupAnchor: [0, -iconSize[1] / 2]
-        });
+        if (isOwn) { className = 'player-marker own-player-marker'; iconSize = [18, 18]; }
+        if (isUserMrX) { className = 'player-marker mrx-marker'; iconSize = [18, 18]; }
+        return L.divIcon({ className: className, iconSize: iconSize, iconAnchor: [iconSize[0] / 2, iconSize[1] / 2], popupAnchor: [0, -iconSize[1] / 2] });
     }
 
-    // --- HILFSFUNKTION: Erstellt den HTML-Inhalt für Popups ---
     function createPopupContent(username, lat, lon) {
         const mapsUrl = `https://www.google.com/maps?q=${lat},${lon}`;
         let title = `<strong>${username}</strong>`;
-        if (username === mrXUsername) {
-            title += ' <span style="color:red;">(Mr. X)</span>';
-        } else if (username === currentUsername) {
-            title = `<strong>Das bin ich (${currentUsername})</strong>`;
-        }
-
-        // Erstelle den Button mit der korrekten URL im onclick
+        if (username === mrXUsername) { title += ' <span style="color:red;">(Mr. X)</span>'; }
+        else if (username === currentUsername) { title = `<strong>Das bin ich (${currentUsername})</strong>`; }
         const buttonHtml = `<button class="map-popup-button" onclick="window.open('${mapsUrl}', '_blank')">In Google Maps öffnen</button>`;
-
         return `${title}<br>${buttonHtml}`;
     }
-
 
     function updateOwnMarker(lat, lon) {
         const latLng = [lat, lon];
         const icon = createMarkerIcon(currentUsername);
-        // NEU: Popup-Inhalt generieren
         const popupContent = createPopupContent(currentUsername, lat, lon);
-
         if (ownMarker) {
             ownMarker.setLatLng(latLng);
-            if (ownMarker.options.icon.options.className !== icon.options.className) {
-                 ownMarker.setIcon(icon);
-            }
-            // NEU: Popup-Inhalt aktualisieren
+            if (ownMarker.options.icon.options.className !== icon.options.className) { ownMarker.setIcon(icon); }
             ownMarker.setPopupContent(popupContent);
         } else {
             ownMarker = L.marker(latLng, { icon: icon, zIndexOffset: 1000 }).addTo(map);
-            // NEU: Popup mit generiertem Inhalt binden
             ownMarker.bindPopup(popupContent);
         }
     }
 
     function updateMarker(username, lat, lon) {
-        if (username === currentUsername) {
-             updateOwnMarker(lat, lon);
-             return;
-        }
-
+        if (username === currentUsername) { updateOwnMarker(lat, lon); return; }
         const latLng = [lat, lon];
         const icon = createMarkerIcon(username);
-        // NEU: Popup-Inhalt generieren
         const popupContent = createPopupContent(username, lat, lon);
-
         if (userMarkers[username]) {
             userMarkers[username].setLatLng(latLng);
-             if (userMarkers[username].options.icon.options.className !== icon.options.className) {
-                userMarkers[username].setIcon(icon);
-             }
-             // NEU: Popup-Inhalt aktualisieren
+             if (userMarkers[username].options.icon.options.className !== icon.options.className) { userMarkers[username].setIcon(icon); }
              userMarkers[username].setPopupContent(popupContent);
         } else {
             const zIndex = (username === mrXUsername) ? 900 : 500;
             userMarkers[username] = L.marker(latLng, { icon: icon, zIndexOffset: zIndex }).addTo(map);
-            // NEU: Popup mit generiertem Inhalt binden
             userMarkers[username].bindPopup(popupContent);
             console.log(`Marker für ${username} erstellt.`);
         }
@@ -386,10 +359,7 @@
     function reportFound() {
         const finderSelect = document.getElementById('finder-selection');
         const selectedFinder = finderSelect ? finderSelect.value : null;
-        if (!selectedFinder) {
-            alert("Bitte wähle aus, wer dich gefunden hat.");
-            return;
-        }
+        if (!selectedFinder) { alert("Bitte wähle aus, wer dich gefunden hat."); return; }
         console.log(`Melde: Gefunden von ${selectedFinder}`);
         if (window.socket && window.socket.connected) {
             window.socket.emit('mr_x_found', { finder: selectedFinder });
@@ -397,9 +367,7 @@
             finderSelect.disabled = true;
              const decoyButton = document.getElementById('decoy-button');
              if (decoyButton) decoyButton.disabled = true;
-        } else {
-            alert("Keine Verbindung zum Server. Konnte Fund nicht melden.");
-        }
+        } else { alert("Keine Verbindung zum Server. Konnte Fund nicht melden."); }
     }
 
     function toggleDecoyPlacement() {
@@ -424,10 +392,7 @@
         isPlacingDecoy = false;
         document.getElementById('map').classList.remove('decoy-placement-active');
         updateDecoyButtonState();
-         if (tempDecoyMarker) {
-            map.removeLayer(tempDecoyMarker);
-            tempDecoyMarker = null;
-        }
+         if (tempDecoyMarker) { map.removeLayer(tempDecoyMarker); tempDecoyMarker = null; }
     }
 
     function handleMapClickForDecoy(e) {
@@ -436,15 +401,11 @@
         const lon = e.latlng.lng;
         console.log(`Decoy location selected: Lat=${lat}, Lon=${lon}`);
         if (tempDecoyMarker) map.removeLayer(tempDecoyMarker);
-        tempDecoyMarker = L.marker([lat, lon], {
-             icon: L.divIcon({ className: 'decoy-placement-marker', iconSize: [20, 20], iconAnchor: [10, 10] })
-        }).addTo(map);
+        tempDecoyMarker = L.marker([lat, lon], { icon: L.divIcon({ className: 'decoy-placement-marker', iconSize: [20, 20], iconAnchor: [10, 10] }) }).addTo(map);
         tempDecoyMarker.bindPopup("Falscher Standort hier?").openPopup();
         if (window.socket && window.socket.connected) {
             window.socket.emit('set_decoy_location', { lat: lat, lon: lon });
-        } else {
-            alert("Keine Verbindung zum Server. Ablenkungsmanöver konnte nicht gesetzt werden.");
-        }
+        } else { alert("Keine Verbindung zum Server. Ablenkungsmanöver konnte nicht gesetzt werden."); }
         exitDecoyPlacementMode();
     }
 
@@ -452,13 +413,8 @@
         const decoyButton = document.getElementById('decoy-button');
         if (!decoyButton) return;
         decoyButton.classList.remove('placing');
-        if (mrxDecoyAvailable) {
-            decoyButton.disabled = false;
-            decoyButton.textContent = "Ablenkungsmanöver (1 verfügbar)";
-        } else {
-            decoyButton.disabled = true;
-            decoyButton.textContent = "Ablenkungsmanöver benutzt";
-        }
+        if (mrxDecoyAvailable) { decoyButton.disabled = false; decoyButton.textContent = "Ablenkungsmanöver (1 verfügbar)"; }
+        else { decoyButton.disabled = true; decoyButton.textContent = "Ablenkungsmanöver benutzt"; }
     }
 
     // --- Hilfsfunktionen für Finder-Liste ---
@@ -484,9 +440,7 @@
          if (!finderSelect || username === currentUsername) return;
          console.log("Adding player to finder list:", username);
          let exists = false;
-         for (let i = 0; i < finderSelect.options.length; i++) {
-             if (finderSelect.options[i].value === username) { exists = true; break; }
-         }
+         for (let i = 0; i < finderSelect.options.length; i++) { if (finderSelect.options[i].value === username) { exists = true; break; } }
          if (!exists) {
              const option = document.createElement('option');
              option.value = username;
@@ -499,9 +453,7 @@
          const finderSelect = document.getElementById('finder-selection');
          if (!finderSelect) return;
          console.log("Removing player from finder list:", username);
-         for (let i = 0; i < finderSelect.options.length; i++) {
-             if (finderSelect.options[i].value === username) { finderSelect.remove(i); break; }
-         }
+         for (let i = 0; i < finderSelect.options.length; i++) { if (finderSelect.options[i].value === username) { finderSelect.remove(i); break; } }
      }
 
      // --- Temporäre Nachrichten anzeigen ---
@@ -527,6 +479,47 @@
              setTimeout(() => { messageDiv.remove(); }, 500);
          }, 3500);
      }
+
+    // --- Timer Funktionen ---
+    function startTimer() {
+        stopTimer();
+        if (mrxUpdateIntervalSeconds > 0) {
+            console.log("Starting Mr. X update timer.");
+            updateTimerDisplay();
+            timerIntervalId = setInterval(updateTimerDisplay, 1000);
+        } else {
+             timerDisplayElement.textContent = "N/A";
+             console.log("Timer nicht gestartet (Intervall 0 oder ungültig).");
+        }
+    }
+
+    function stopTimer() {
+        if (timerIntervalId) {
+            console.log("Stopping Mr. X update timer.");
+            clearInterval(timerIntervalId);
+            timerIntervalId = null;
+            timerDisplayElement.textContent = "--:--";
+        }
+    }
+
+    function updateTimerDisplay() {
+        if (mrxUpdateIntervalSeconds <= 0 || mrxLastBroadcastTimestampMs <= 0) {
+             timerDisplayElement.textContent = "Warte...";
+             return;
+        }
+        const nowMs = Date.now();
+        const nextBroadcastTimeMs = mrxLastBroadcastTimestampMs + (mrxUpdateIntervalSeconds * 1000);
+        const remainingSeconds = Math.max(0, Math.round((nextBroadcastTimeMs - nowMs) / 1000));
+        timerDisplayElement.textContent = formatTime(remainingSeconds);
+    }
+
+    function formatTime(totalSeconds) {
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        const paddedMinutes = String(minutes).padStart(2, '0');
+        const paddedSeconds = String(seconds).padStart(2, '0');
+        return `${paddedMinutes}:${paddedSeconds}`;
+    }
 
 </script>
 
