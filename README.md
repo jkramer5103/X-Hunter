@@ -18,7 +18,7 @@ docker pull jkramer5103/x-hunter
 ```
 
 ```bash
-docker run -p 1432:1432 jkramer5103/x-hunter:latest
+docker run --name x-hunter -d -p 1432:1432 jkramer5103/x-hunter:latest
 ```
 The server now runs on port 1432
 
