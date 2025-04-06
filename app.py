@@ -38,7 +38,7 @@ def reset_game_state(notify_clients=True): # Parameter hinzugefügt
     # Sende die Nachricht nur, wenn notify_clients True ist
     if notify_clients:
         print("Notifying clients about game reset.")
-        socketio.emit('game_over', {'message': 'Das Spiel wurde beendet, da Mr. X nicht mehr online ist.', 'finder': None})
+        socketio.emit('game_over', {'message': 'Das Spiel wurde beendet oder zurückgesetzt.', 'finder': None})
     else:
          print("Game reset without notifying clients (notification already sent).")
 
@@ -85,7 +85,8 @@ def start_game():
     game_state["active"] = True
     game_state["mr_x"] = selected_mr_x
     game_state["update_interval_minutes"] = interval_minutes
-    game_state["mr_x_last_broadcast_time"] = time.time()
+    # ÄNDERUNG HIER: Setze auf 0, damit das erste Update sofort durchkommt
+    game_state["mr_x_last_broadcast_time"] = 0
     game_state["mr_x_last_known_location"] = None
     game_state["players"] = {}
 
@@ -146,7 +147,6 @@ def logout():
         # Wenn der User im Spiel war und Mr. X ist, Spiel beenden
         if game_state["active"] and username == game_state["mr_x"]:
             print(f"Mr. X ({username}) hat sich ausgeloggt. Spiel wird beendet.")
-            # Hier ist die generische Nachricht von reset_game_state() gewünscht
             reset_game_state() # Ruft mit notify_clients=True (Standard) auf
     return redirect(url_for("login"))
 
@@ -211,7 +211,6 @@ def handle_disconnect():
             # Prüfe NUR, ob Mr. X gegangen ist
             if username == game_state["mr_x"]:
                 print(f"Mr. X ({username}) disconnected. Ending game.")
-                # Hier ist die generische Nachricht von reset_game_state() gewünscht
                 reset_game_state() # Ruft mit notify_clients=True (Standard) auf
 
     else:
@@ -237,13 +236,16 @@ def handle_location_update(data):
     if username == game_state["mr_x"]:
         game_state["mr_x_last_known_location"] = {"lat": lat, "lon": lon}
         now = time.time()
-        interval_seconds = game_state["update_interval_minutes"] * 60
+        # Die Zeit seit der letzten Sendung wird geprüft
         time_since_last_broadcast = now - game_state["mr_x_last_broadcast_time"]
+        interval_seconds = game_state["update_interval_minutes"] * 60
 
+        # Die Bedingung wird beim ersten Mal (da mr_x_last_broadcast_time = 0 ist) erfüllt sein
         if time_since_last_broadcast >= interval_seconds:
             print(f"Broadcasting Mr. X ({username}) location update.")
             # Sende an alle (ohne broadcast=True)
             socketio.emit("location_update", update_data)
+            # Setze den Zeitstempel für die nächste Prüfung
             game_state["mr_x_last_broadcast_time"] = now
     else:
         # Sende Update sofort an alle ANDEREN (ohne broadcast=True, mit skip_sid)
