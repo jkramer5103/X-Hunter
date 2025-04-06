@@ -1,11 +1,16 @@
 
 # X-Hunter
 
-This is a Game where you hunt Mr. X. Mr. X and the Hunters can use public Transportation.
+In X-Hunter, experience the thrill of the chase as players team up to hunt the elusive Mr. X! Both Mr. X and the hunters strategically use public transportation to traverse the game map.
 
-The position of Mr. X is updated every 5 Minutes (You can change this Interval at the start of every game.)
+The game features:
 
-The position of Mr. X is shown as a red dot and all the players as a blue dot, you can see the players names by clicking on their dots.
+*   Real-time tracking: Mr. X's position updates at set intervals (configurable at game start).
+*   Visual interface: Mr. X appears as a red dot, hunters as blue dots.
+*   Player identification: Click on a hunter's dot to reveal their name.
+
+Get ready to coordinate, strategize, and outwit Mr. X!
+
 ## Installation guide
 
 Clone the project
