@@ -11,6 +11,21 @@ The game features:
 
 Get ready to coordinate, strategize, and outwit Mr. X!
 
+## Quickstart With Docker
+
+```bash
+docker pull jkramer5103/x-hunter
+```
+
+```bash
+docker pull jkramer5103/x-hunter
+```
+
+```bash
+docker run -p 1432:1432 jkramer5103/x-hunter:latest
+```
+The server now runs on port 1432
+
 ## Installation guide
 
 Clone the project
@@ -42,4 +57,4 @@ Start the server
 ```bash
 python3 app.py
 ```
-
+The server now runs on port 1432
