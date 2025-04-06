@@ -1,6 +1,6 @@
 import os
 import time
-import json # Importiere das json Modul
+import json
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from flask_socketio import SocketIO, emit
 from werkzeug.security import check_password_hash
@@ -8,26 +8,19 @@ import threading
 
 # --- Lade Benutzerdaten aus JSON ---
 USERS_FILE = "users.json"
-loaded_users = {} # Standardmäßig leeres Dictionary
-
+loaded_users = {}
 try:
-    # Stelle sicher, dass der Pfad relativ zum Skriptverzeichnis ist
     base_dir = os.path.dirname(os.path.abspath(__file__))
     users_file_path = os.path.join(base_dir, USERS_FILE)
     with open(users_file_path, 'r', encoding='utf-8') as f:
         loaded_users = json.load(f)
     print(f"Benutzerdaten erfolgreich aus {USERS_FILE} geladen.")
-except FileNotFoundError:
-    print(f"FEHLER: {USERS_FILE} nicht gefunden. Keine Benutzer geladen.")
-    # Hier könntest du entscheiden, ob die App trotzdem starten soll
-except json.JSONDecodeError:
-    print(f"FEHLER: Konnte JSON aus {USERS_FILE} nicht dekodieren. Bitte Format prüfen.")
 except Exception as e:
-    print(f"FEHLER: Unerwarteter Fehler beim Laden von {USERS_FILE}: {e}")
+    print(f"FEHLER beim Laden von {USERS_FILE}: {e}")
 
 # --- Konfiguration ---
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "sehr-geheim-fuer-spiel-ohne-bilder")
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "sehr-geheim-fuer-spiel-mit-decoy")
 socketio = SocketIO(app, async_mode="eventlet")
 
 # --- Konstante für Karenzzeit ---
@@ -41,7 +34,10 @@ game_state = {
     "mr_x_last_broadcast_time": 0,
     "mr_x_last_known_location": None,
     "players": {},
-    "mrx_disconnect_task_pending": False
+    "mrx_disconnect_task_pending": False,
+    "mrx_decoy_available": True,
+    "mrx_pending_decoy_location": None,
+    "mrx_last_update_was_decoy": False
 }
 
 # --- Hilfsfunktionen ---
@@ -68,6 +64,9 @@ def reset_game_state(notify_clients=True):
     game_state["mr_x_last_broadcast_time"] = 0
     game_state["mr_x_last_known_location"] = None
     game_state["players"] = {}
+    game_state["mrx_decoy_available"] = True
+    game_state["mrx_pending_decoy_location"] = None
+    game_state["mrx_last_update_was_decoy"] = False
 
     if notify_clients:
         print("Notifying clients about game reset.")
@@ -80,14 +79,9 @@ def reset_game_state(notify_clients=True):
 
 @app.route("/")
 def index():
-    """Startseite: Zeigt Spielkonfiguration oder leitet zur Karte/Login weiter."""
-    if not session.get("username"):
-        return redirect(url_for("login"))
-
-    if game_state["active"]:
-        return redirect(url_for("map_page"))
+    if not session.get("username"): return redirect(url_for("login"))
+    if game_state["active"]: return redirect(url_for("map_page"))
     else:
-        # Verwende loaded_users
         registered_users = list(loaded_users.keys())
         return render_template("start.html", registered_users=registered_users)
 
@@ -104,11 +98,9 @@ def start_game():
     selected_mr_x = request.form.get("mr_x")
     interval_str = request.form.get("interval", "5")
 
-    # Verwende loaded_users
     if not selected_mr_x or selected_mr_x not in loaded_users:
         flash("Bitte wähle einen gültigen Spieler als Mr. X aus.", "error")
         return redirect(url_for("index"))
-
     try:
         interval_minutes = int(interval_str)
         if interval_minutes <= 0:
@@ -117,13 +109,18 @@ def start_game():
         flash("Bitte gib ein gültiges Update-Intervall (positive Zahl) an.", "error")
         return redirect(url_for("index"))
 
+    # --- KEIN reset_game_state() HIER ---
+    # Explizite Initialisierung aller Werte für das neue Spiel:
     game_state["active"] = True
     game_state["mr_x"] = selected_mr_x
     game_state["update_interval_minutes"] = interval_minutes
-    game_state["mr_x_last_broadcast_time"] = 0
+    game_state["mr_x_last_broadcast_time"] = 0 # Für sofortiges erstes Update
     game_state["mr_x_last_known_location"] = None
     game_state["players"] = {}
     game_state["mrx_disconnect_task_pending"] = False
+    game_state["mrx_decoy_available"] = True
+    game_state["mrx_pending_decoy_location"] = None
+    game_state["mrx_last_update_was_decoy"] = False
 
     print(f"Spiel gestartet! Mr. X: {selected_mr_x}, Interval: {interval_minutes} min")
     flash(f"Spiel gestartet! {selected_mr_x} ist Mr. X.", "success")
@@ -132,17 +129,14 @@ def start_game():
         'mr_x': game_state['mr_x'],
         'interval': game_state['update_interval_minutes']
     })
-
     return redirect(url_for("map_page"))
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    """Verarbeitet den Login."""
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
-        # Verwende loaded_users
         user_data = loaded_users.get(username)
         if user_data and check_password_hash(user_data["password"], password):
             session["username"] = username
@@ -151,31 +145,25 @@ def login():
         else:
             flash("Ungültiger Benutzername oder Passwort", "error")
             return redirect(url_for("login"))
-
-    if "username" in session:
-        return redirect(url_for("index"))
-
+    if "username" in session: return redirect(url_for("index"))
     return render_template("login.html")
 
 @app.route("/map")
 def map_page():
-    """Zeigt die Karte, aber nur wenn ein Spiel aktiv ist."""
-    if "username" not in session:
-        return redirect(url_for("login"))
+    if "username" not in session: return redirect(url_for("login"))
     if not game_state["active"]:
         flash("Derzeit läuft kein Spiel.", "info")
         return redirect(url_for("index"))
-
     return render_template(
         "map.html",
         username=session["username"],
         mr_x_username=game_state["mr_x"],
-        current_players_list=[p for p in game_state["players"] if p != session["username"]]
+        current_players_list=[p for p in game_state["players"] if p != session["username"]],
+        mrx_decoy_available=game_state["mrx_decoy_available"]
     )
 
 @app.route("/logout")
 def logout():
-    """Meldet den Nutzer ab."""
     username = session.pop("username", None)
     if username:
         print(f"User '{username}' logged out.")
@@ -189,7 +177,6 @@ def logout():
 
 @socketio.on("connect")
 def handle_connect():
-    """Wenn ein Client verbindet."""
     if "username" not in session: return False
     username = session["username"]
     sid = request.sid
@@ -221,7 +208,8 @@ def handle_connect():
     emit("game_update", {
         "mr_x": game_state["mr_x"],
         "locations": current_locations,
-        "players": list(game_state["players"].keys())
+        "players": list(game_state["players"].keys()),
+        "mrx_decoy_available": game_state["mrx_decoy_available"] if username == game_state["mr_x"] else None
     })
 
     socketio.emit("player_joined", {"username": username}, room=None, skip_sid=sid)
@@ -229,7 +217,6 @@ def handle_connect():
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    """Wenn ein Client die Verbindung trennt."""
     username = None
     sid = request.sid
     disconnecting_user = None
@@ -263,9 +250,8 @@ def handle_disconnect():
         session_username = session.get('username', 'Unknown User')
         print(f"Client disconnected: {session_username} (SID: {sid}), war nicht in aktivem Spiel registriert.")
 
-# Wrapper-Funktion für den Hintergrund-Task, um Argumente zu übergeben
+# Wrapper-Funktion für den Hintergrund-Task
 def end_game_due_to_mrx_disconnect_wrapper(grace_period):
-    """Wrapper, um socketio.sleep im Hintergrund-Task zu verwenden."""
     print(f"Background task started: Wait {grace_period}s for Mr. X reconnect.")
     socketio.sleep(grace_period)
     print("Background task finished waiting.")
@@ -274,7 +260,6 @@ def end_game_due_to_mrx_disconnect_wrapper(grace_period):
 
 @socketio.on("update_location")
 def handle_location_update(data):
-    """Empfängt Standort-Update und verteilt es gemäß Spielregeln."""
     if "username" not in session or not game_state["active"]: return
     username = session["username"]
     if username not in game_state["players"]: return
@@ -284,32 +269,80 @@ def handle_location_update(data):
     if lat is None or lon is None: return
 
     game_state["players"][username]['last_location'] = {"lat": lat, "lon": lon}
-    update_data = {"username": username, "lat": lat, "lon": lon}
     sid = request.sid
 
     if username == game_state["mr_x"]:
-        game_state["mr_x_last_known_location"] = {"lat": lat, "lon": lon}
+        real_location = {"lat": lat, "lon": lon}
+        game_state["mr_x_last_known_location"] = real_location
+
         now = time.time()
         time_since_last_broadcast = now - game_state["mr_x_last_broadcast_time"]
         interval_seconds = game_state["update_interval_minutes"] * 60
 
         if time_since_last_broadcast >= interval_seconds:
-            print(f"Broadcasting Mr. X ({username}) location update.")
+            location_to_send = None
+            is_decoy_update = False
+            announce_previous_decoy = False
+
+            if game_state["mrx_pending_decoy_location"]:
+                print(f"Sending DECOY location for Mr. X ({username}).")
+                location_to_send = game_state["mrx_pending_decoy_location"]
+                is_decoy_update = True
+                game_state["mrx_last_update_was_decoy"] = True
+                game_state["mrx_pending_decoy_location"] = None
+            else:
+                location_to_send = real_location
+                if game_state["mrx_last_update_was_decoy"]:
+                    print(f"Sending REAL location for Mr. X ({username}) and announcing previous was DECOY.")
+                    announce_previous_decoy = True
+                    game_state["mrx_last_update_was_decoy"] = False
+                else:
+                     print(f"Sending REAL location for Mr. X ({username}).")
+
+            update_data = {
+                "username": username,
+                "lat": location_to_send["lat"],
+                "lon": location_to_send["lon"],
+                "previous_was_decoy": announce_previous_decoy
+            }
+
             socketio.emit("location_update", update_data)
             game_state["mr_x_last_broadcast_time"] = now
     else:
+        update_data = {"username": username, "lat": lat, "lon": lon}
         socketio.emit("location_update", update_data, room=None, skip_sid=sid)
+
+
+@socketio.on("set_decoy_location")
+def handle_set_decoy_location(data):
+    if "username" not in session or not game_state["active"]: return
+    username = session["username"]
+
+    if username != game_state["mr_x"]: return
+    if not game_state["mrx_decoy_available"]:
+        emit('error_message', {'message': 'Ablenkungsmanöver bereits verwendet!'})
+        return
+
+    lat = data.get("lat")
+    lon = data.get("lon")
+    if lat is None or lon is None:
+        emit('error_message', {'message': 'Ungültige Koordinaten für Ablenkungsmanöver.'})
+        return
+
+    game_state["mrx_pending_decoy_location"] = {"lat": lat, "lon": lon}
+    game_state["mrx_decoy_available"] = False
+    print(f"Mr. X ({username}) set pending decoy location: Lat={lat}, Lon={lon}")
+
+    emit("decoy_set_confirmation", {"lat": lat, "lon": lon})
 
 
 @socketio.on("mr_x_found")
 def handle_mr_x_found(data):
-    """Mr. X meldet, dass er gefunden wurde."""
     if not game_state["active"] or "username" not in session: return
     username = session["username"]
     if username != game_state["mr_x"]: return
 
     finder = data.get("finder")
-    # Verwende loaded_users hier nicht, prüfe gegen game_state["players"]
     if not finder or finder not in game_state["players"]:
         emit('error_message', {'message': f"Ungültiger Finder '{finder}' ausgewählt."})
         return
@@ -321,13 +354,12 @@ def handle_mr_x_found(data):
         'finder': finder,
         'mr_x': game_state['mr_x']
     })
-
     reset_game_state(notify_clients=False)
 
 
 # --- App Start ---
 if __name__ == "__main__":
-    print("Starting Flask-SocketIO server for Mr. X Game (users from JSON)...")
+    print("Starting Flask-SocketIO server for Mr. X Game (with decoy & grace period)...")
     port = 1432
     host = "0.0.0.0"
     try:

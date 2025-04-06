@@ -11,20 +11,26 @@
 
     <style>
         /* Grundlegende Layout-Styles */
-        html, body { height: 100%; margin: 0; padding: 0; font-family: sans-serif; } /* Höhe für html/body hinzufügen */
-        body { display: flex; flex-direction: column; } /* Body als Flex-Container */
-        #map-container { flex-grow: 1; position: relative; min-height: 0; } /* Wichtig für Flexbox-Kinder */
-        #map { height: 100%; width: 100%; }
+        html, body { height: 100%; margin: 0; padding: 0; font-family: sans-serif; }
+        body { display: flex; flex-direction: column; }
+        #map-container { flex-grow: 1; position: relative; min-height: 0; }
+        #map { height: 100%; width: 100%; cursor: default; }
+        #map.decoy-placement-active { cursor: crosshair !important; }
         #header { padding: 8px 15px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
         #header .user-info span { margin-right: 15px; }
         #header .user-info strong { color: #007bff; }
         #header .game-info { font-weight: bold; }
         #header .game-info .mrx { color: #d9534f; }
         #header a { text-decoration: none; color: #007bff; margin-left: 10px; }
-        #mrx-actions { margin-top: 10px; text-align: center; padding: 10px; background-color: #f8d7da; border-top: 1px solid #f5c6cb; flex-shrink: 0; }
+        #mrx-actions { display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 10px; text-align: center; padding: 10px; background-color: #f8d7da; border-top: 1px solid #f5c6cb; flex-shrink: 0; }
         #mrx-actions button { padding: 8px 15px; background-color: #d9534f; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
         #mrx-actions button:hover { background-color: #c9302c; }
-        #finder-selection { margin-left: 15px; padding: 5px; border-radius: 3px; border: 1px solid #ccc; }
+        #mrx-actions button:disabled { background-color: #aaa; cursor: not-allowed; }
+        #mrx-actions label { margin: 0; }
+        #finder-selection { margin-left: 5px; padding: 5px; border-radius: 3px; border: 1px solid #ccc; }
+        #decoy-button { background-color: #f0ad4e; }
+        #decoy-button:hover { background-color: #ec971f; }
+        #decoy-button.placing { background-color: #5bc0de; }
 
         /* Game Over Overlay */
         #game-over-overlay {
@@ -35,14 +41,14 @@
             height: 100%;
             background-color: rgba(0, 0, 0, 0.7);
             color: white;
-            display: none; /* Standardmäßig versteckt */
+            display: none;
             justify-content: center;
             align-items: center;
             text-align: center;
-            z-index: 1000; /* Über der Karte */
+            z-index: 1000;
             font-size: 1.5em;
         }
-        #game-over-overlay h2 {
+         #game-over-overlay h2 {
              margin-bottom: 20px;
         }
         #game-over-overlay button {
@@ -52,31 +58,39 @@
             cursor: pointer;
         }
 
-        /* Styles für DivIcon Marker (Farbige Kreise) */
+        /* Styles für DivIcon Marker */
         .player-marker {
-            background-color: rgba(51, 136, 255, 0.8); /* Blau für andere Spieler */
+            background-color: rgba(51, 136, 255, 0.8);
             border: 2px solid white;
             border-radius: 50%;
             box-shadow: 0 0 5px rgba(0,0,0,0.5);
-            width: 15px; /* Kleinere Kreise */
+            width: 15px;
             height: 15px;
         }
         .own-player-marker {
-            background-color: rgba(0, 123, 255, 0.9); /* Kräftigeres Blau für eigenen Spieler */
+            background-color: rgba(0, 123, 255, 0.9);
             border: 2px solid white;
             width: 18px;
             height: 18px;
-            border-radius: 50%; /* Sicherstellen, dass es rund ist */
+            border-radius: 50%;
             box-shadow: 0 0 6px rgba(0, 123, 255, 0.7);
         }
         .mrx-marker {
-            background-color: rgba(217, 83, 79, 0.9); /* Rot für Mr. X */
+            background-color: rgba(217, 83, 79, 0.9);
             border: 2px solid white;
-            width: 18px; /* Mr. X gleich groß wie eigener Spieler */
+            width: 18px;
             height: 18px;
-            border-radius: 50%; /* Sicherstellen, dass es rund ist */
-            box-shadow: 0 0 8px rgba(255, 0, 0, 0.8); /* Roter Schein */
+            border-radius: 50%;
+            box-shadow: 0 0 8px rgba(255, 0, 0, 0.8);
         }
+        .decoy-placement-marker {
+            background-color: rgba(240, 173, 78, 0.7);
+            border: 2px dashed white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+        }
+        /* Leere CSS-Regeln wurden entfernt oder hatten bereits Inhalt */
 
     </style>
 </head>
@@ -107,14 +121,19 @@
 
 {% if username == mr_x_username %}
 <div id="mrx-actions">
-    <label for="finder-selection">Ich wurde gefunden von:</label>
-    <select id="finder-selection">
-        <option value="" disabled selected>-- Spieler auswählen --</option>
-        {% for player in current_players_list %}
-            <option value="{{ player }}">{{ player }}</option>
-        {% endfor %}
-    </select>
-    <button id="found-button">Gefunden melden!</button>
+    <button id="decoy-button" {% if not mrx_decoy_available %}disabled{% endif %}>
+        {% if mrx_decoy_available %}Ablenkungsmanöver (1 verfügbar){% else %}Ablenkungsmanöver benutzt{% endif %}
+    </button>
+    <div>
+        <label for="finder-selection">Ich wurde gefunden von:</label>
+        <select id="finder-selection">
+            <option value="" disabled selected>-- Spieler auswählen --</option>
+            {% for player in current_players_list %}
+                <option value="{{ player }}">{{ player }}</option>
+            {% endfor %}
+        </select>
+        <button id="found-button">Gefunden melden!</button>
+    </div>
 </div>
 {% endif %}
 
@@ -122,21 +141,32 @@
 <script>
     // --- Globale Variablen ---
     let map;
-    let userMarkers = {}; // {username: L.marker}
+    let userMarkers = {};
     const currentUsername = "{{ username }}";
     const mrXUsername = "{{ mr_x_username }}";
     let ownMarker = null;
     let isMrX = currentUsername === mrXUsername;
+    // KORREKTUR: Wert als String übergeben und in JS parsen
+    let mrxDecoyAvailable = "{{ mrx_decoy_available }}" === "True"; // Wandelt Python True -> "True" -> JS true
+    let isPlacingDecoy = false;
+    let tempDecoyMarker = null;
 
     // --- Initialisierung ---
     document.addEventListener('DOMContentLoaded', () => {
-        console.log("DOM geladen. Initialisiere Karte und SocketIO (ohne Profilbilder).");
+        console.log("DOM geladen. Initialisiere Karte und SocketIO (mit Decoy).");
+        // Initialen Status des Decoy-Buttons setzen (falls Mr. X)
+        if (isMrX) {
+            updateDecoyButtonState();
+        }
         initializeMap();
         initializeSocketIO();
         startLocationWatch();
 
         const foundButton = document.getElementById('found-button');
         if (foundButton) foundButton.addEventListener('click', reportFound);
+        const decoyButton = document.getElementById('decoy-button');
+        if (decoyButton) decoyButton.addEventListener('click', toggleDecoyPlacement);
+
         document.getElementById('back-to-start-button').addEventListener('click', () => {
             window.location.href = "{{ url_for('index') }}";
         });
@@ -144,12 +174,13 @@
 
     // --- Karteninitialisierung ---
     function initializeMap() {
-        map = L.map('map').setView([53.5511, 9.9937], 13); // Hamburg
+        map = L.map('map').setView([53.5511, 9.9937], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         }).addTo(map);
         console.log("Karte initialisiert.");
+        map.on('click', handleMapClickForDecoy);
     }
 
     // --- Socket.IO Initialisierung & Event Handling ---
@@ -166,22 +197,48 @@
             Object.keys(userMarkers).forEach(username => removeMarker(username));
             if (ownMarker) { map.removeLayer(ownMarker); ownMarker = null; }
 
-            for (const username in data.locations) {
-                const locData = data.locations[username];
-                if (username === currentUsername) {
-                    updateOwnMarker(locData.lat, locData.lon);
-                } else {
-                    updateMarker(username, locData.lat, locData.lon);
+            // Robustheit: Prüfen ob locations vorhanden sind
+            if (data.locations) {
+                for (const username in data.locations) {
+                    const locData = data.locations[username];
+                    // Robustheit: Prüfen ob locData und Koordinaten vorhanden sind
+                    if (locData && locData.lat !== undefined && locData.lon !== undefined) {
+                        if (username === currentUsername) {
+                            updateOwnMarker(locData.lat, locData.lon);
+                        } else {
+                            updateMarker(username, locData.lat, locData.lon);
+                        }
+                    } else {
+                         console.warn(`Unvollständige Standortdaten für ${username} in game_update:`, locData);
+                    }
                 }
+            } else {
+                console.warn("game_update ohne Standortdaten empfangen.");
             }
+
+            // Robustheit: Standardwert für players setzen
             updateFinderList(data.players || []);
+
+            // Update Decoy Button Status bei Reconnect
+            if (isMrX && data.mrx_decoy_available !== null && data.mrx_decoy_available !== undefined) {
+                mrxDecoyAvailable = data.mrx_decoy_available;
+                updateDecoyButtonState();
+            }
         });
 
         socket.on('location_update', (data) => {
-            if (data.username === currentUsername) {
-                 updateOwnMarker(data.lat, data.lon);
+            if (data.previous_was_decoy) {
+                showTemporaryMessage(`Achtung! Der vorherige Standort von Mr. X (${mrXUsername}) war ein Ablenkungsmanöver!`, "warning");
+            }
+            // Robustheit: Prüfen ob Koordinaten vorhanden sind
+            if (data.lat !== undefined && data.lon !== undefined) {
+                if (data.username === currentUsername) {
+                    updateOwnMarker(data.lat, data.lon);
+                } else {
+                    updateMarker(data.username, data.lat, data.lon);
+                }
             } else {
-                updateMarker(data.username, data.lat, data.lon);
+                 console.warn(`Unvollständige Standortdaten in location_update für ${data.username}:`, data);
             }
         });
 
@@ -198,17 +255,29 @@
             showTemporaryMessage(`${data.username} hat das Spiel verlassen.`, "warning");
         });
 
+        socket.on('decoy_set_confirmation', (data) => {
+            console.log("Decoy wurde vom Server bestätigt:", data);
+            showTemporaryMessage("Ablenkungsmanöver gesetzt! Der falsche Standort wird beim nächsten Update gesendet.", "success");
+            mrxDecoyAvailable = false;
+            updateDecoyButtonState();
+            if (tempDecoyMarker) {
+                map.removeLayer(tempDecoyMarker);
+                tempDecoyMarker = null;
+            }
+        });
+
         socket.on('game_over', (data) => {
             console.log("Spiel vorbei!", data);
-            // Diese Zeile nimmt die komplette Nachricht vom Server
             document.getElementById('game-over-message').innerText = data.message;
             document.getElementById('game-over-overlay').style.display = 'flex';
             if (locationWatchId) {
                 navigator.geolocation.clearWatch(locationWatchId);
                 locationWatchId = null;
             }
+            if (isPlacingDecoy) {
+                exitDecoyPlacementMode();
+            }
         });
-
 
         socket.on('redirect', (data) => {
             console.log('Redirect empfangen:', data.url);
@@ -253,7 +322,7 @@
         );
     }
 
-    // --- Marker-Management (angepasst für DivIcon) ---
+    // --- Marker-Management ---
     function createMarkerIcon(username) {
         const isOwn = username === currentUsername;
         const isUserMrX = username === mrXUsername;
@@ -342,35 +411,97 @@
         }
     }
 
-     // --- Hilfsfunktionen für Finder-Liste (nur für Mr. X relevant) ---
-     function updateFinderList(playerUsernames) {
+    function toggleDecoyPlacement() {
+        if (!isMrX || !mrxDecoyAvailable) return;
+        isPlacingDecoy = !isPlacingDecoy;
+        if (isPlacingDecoy) {
+            enterDecoyPlacementMode();
+        } else {
+            exitDecoyPlacementMode();
+        }
+    }
+
+    function enterDecoyPlacementMode() {
+        console.log("Entering decoy placement mode.");
+        isPlacingDecoy = true;
+        document.getElementById('map').classList.add('decoy-placement-active');
+        const decoyButton = document.getElementById('decoy-button');
+        decoyButton.textContent = "Klicke auf die Karte für den falschen Standort...";
+        decoyButton.classList.add('placing');
+        showTemporaryMessage("Klicke auf die Karte, um den falschen Standort für das Ablenkungsmanöver zu wählen.", "info");
+    }
+
+    function exitDecoyPlacementMode() {
+        console.log("Exiting decoy placement mode.");
+        isPlacingDecoy = false;
+        document.getElementById('map').classList.remove('decoy-placement-active');
+        updateDecoyButtonState();
+         if (tempDecoyMarker) {
+            map.removeLayer(tempDecoyMarker);
+            tempDecoyMarker = null;
+        }
+    }
+
+    function handleMapClickForDecoy(e) {
+        if (!isPlacingDecoy || !isMrX) return;
+
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+        console.log(`Decoy location selected: Lat=${lat}, Lon=${lon}`);
+
+        if (tempDecoyMarker) map.removeLayer(tempDecoyMarker);
+        tempDecoyMarker = L.marker([lat, lon], {
+             icon: L.divIcon({ className: 'decoy-placement-marker', iconSize: [20, 20], iconAnchor: [10, 10] })
+        }).addTo(map);
+        tempDecoyMarker.bindPopup("Falscher Standort hier?").openPopup();
+
+        if (window.socket && window.socket.connected) {
+            window.socket.emit('set_decoy_location', { lat: lat, lon: lon });
+        } else {
+            alert("Keine Verbindung zum Server. Ablenkungsmanöver konnte nicht gesetzt werden.");
+        }
+        exitDecoyPlacementMode();
+    }
+
+    function updateDecoyButtonState() {
+        const decoyButton = document.getElementById('decoy-button');
+        if (!decoyButton) return;
+
+        decoyButton.classList.remove('placing');
+        if (mrxDecoyAvailable) {
+            decoyButton.disabled = false;
+            decoyButton.textContent = "Ablenkungsmanöver (1 verfügbar)";
+        } else {
+            decoyButton.disabled = true;
+            decoyButton.textContent = "Ablenkungsmanöver benutzt";
+        }
+    }
+
+
+    // --- Hilfsfunktionen für Finder-Liste ---
+    function updateFinderList(playerUsernames) {
          const finderSelect = document.getElementById('finder-selection');
-         if (!finderSelect) return; // Nur für Mr. X
-
-         console.log("Updating finder list with players:", playerUsernames); // DEBUG
-
+         if (!finderSelect) return;
+         console.log("Updating finder list with players:", playerUsernames);
          const currentSelection = finderSelect.value;
-         while (finderSelect.options.length > 1) { // Behalte die erste "-- auswählen --" Option
+         while (finderSelect.options.length > 1) {
              finderSelect.remove(1);
          }
          playerUsernames.forEach(username => {
-             if (username !== currentUsername) { // Mr. X kann sich nicht selbst finden
+             if (username !== currentUsername) {
                  const option = document.createElement('option');
                  option.value = username;
                  option.textContent = username;
                  finderSelect.appendChild(option);
              }
          });
-         // Versuchen, die alte Auswahl wiederherzustellen, falls noch gültig
          finderSelect.value = currentSelection;
      }
 
      function addPlayerToFinderList(username) {
          const finderSelect = document.getElementById('finder-selection');
          if (!finderSelect || username === currentUsername) return;
-
-         console.log("Adding player to finder list:", username); // DEBUG
-
+         console.log("Adding player to finder list:", username);
          let exists = false;
          for (let i = 0; i < finderSelect.options.length; i++) {
              if (finderSelect.options[i].value === username) {
@@ -378,7 +509,6 @@
                  break;
              }
          }
-
          if (!exists) {
              const option = document.createElement('option');
              option.value = username;
@@ -390,9 +520,7 @@
      function removePlayerFromFinderList(username) {
          const finderSelect = document.getElementById('finder-selection');
          if (!finderSelect) return;
-
-         console.log("Removing player from finder list:", username); // DEBUG
-
+         console.log("Removing player from finder list:", username);
          for (let i = 0; i < finderSelect.options.length; i++) {
              if (finderSelect.options[i].value === username) {
                  finderSelect.remove(i);
