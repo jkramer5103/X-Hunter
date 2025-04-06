@@ -23,15 +23,26 @@
         #header .game-info .mrx { color: #d9534f; }
         #header a { text-decoration: none; color: #007bff; margin-left: 10px; }
         #timer-info { font-weight: bold; color: #555; background-color: #e9ecef; padding: 5px 10px; border-radius: 4px; }
-        #mrx-actions { display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 10px; text-align: center; padding: 10px; background-color: #f8d7da; border-top: 1px solid #f5c6cb; flex-shrink: 0; }
-        #mrx-actions button { padding: 8px 15px; background-color: #d9534f; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+        /* Gemeinsame Styles für Aktionsleisten */
+        .action-bar { display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 10px; text-align: center; padding: 10px; border-top: 1px solid #ccc; flex-shrink: 0; }
+        .action-bar button { padding: 8px 15px; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+        .action-bar button:hover { opacity: 0.9; }
+        .action-bar button:disabled { background-color: #aaa !important; cursor: not-allowed; opacity: 0.7; }
+        .action-bar label { margin: 0; }
+        .action-bar select { margin-left: 5px; padding: 5px; border-radius: 3px; border: 1px solid #ccc; }
+        /* Mr. X Aktionen */
+        #mrx-actions { background-color: #f8d7da; border-color: #f5c6cb; }
+        #mrx-actions button { background-color: #d9534f; }
         #mrx-actions button:hover { background-color: #c9302c; }
-        #mrx-actions button:disabled { background-color: #aaa; cursor: not-allowed; }
-        #mrx-actions label { margin: 0; }
-        #finder-selection { margin-left: 5px; padding: 5px; border-radius: 3px; border: 1px solid #ccc; }
-        #decoy-button { background-color: #f0ad4e; }
-        #decoy-button:hover { background-color: #ec971f; }
-        #decoy-button.placing { background-color: #5bc0de; }
+        #decoy-button { background-color: #f0ad4e !important; } /* Wichtig für Überschreiben */
+        #decoy-button:hover { background-color: #ec971f !important; }
+        #decoy-button.placing { background-color: #5bc0de !important; }
+        /* Sucher Aktionen */
+        #seeker-actions { background-color: #d9edf7; border-color: #bce8f1; }
+        #invisibility-button { background-color: #6c757d; } /* Grau */
+        #invisibility-button:hover { background-color: #5a6268; }
+        #invisibility-button.active { background-color: #31708f !important; } /* Dunkleres Blau wenn aktiv */
+
         #game-over-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); color: white; display: none; justify-content: center; align-items: center; text-align: center; z-index: 1000; font-size: 1.5em; }
         #game-over-overlay h2 { margin-bottom: 20px; }
         #game-over-overlay button { margin-top: 20px; padding: 10px 20px; font-size: 1em; cursor: pointer; }
@@ -72,9 +83,9 @@
     </div>
 </div>
 
+<!-- Aktionsleiste für Mr. X -->
 {% if username == mr_x_username %}
-<div id="mrx-actions">
-    <!-- Button zeigt jetzt verbleibende Anzahl an -->
+<div id="mrx-actions" class="action-bar">
     <button id="decoy-button" {% if mrx_remaining_decoys <= 0 %}disabled{% endif %}>
         Ablenkungsmanöver ({{ mrx_remaining_decoys }} verfügbar)
     </button>
@@ -91,6 +102,16 @@
 </div>
 {% endif %}
 
+<!-- Aktionsleiste für Sucher -->
+{% if username != mr_x_username %}
+<div id="seeker-actions" class="action-bar">
+     <button id="invisibility-button" {% if seeker_remaining_invisibility <= 0 %}disabled{% endif %}>
+        Unsichtbarkeit ({{ seeker_remaining_invisibility }} verfügbar)
+    </button>
+    <!-- Hier könnten weitere Sucher-Aktionen hin -->
+</div>
+{% endif %}
+
 
 <script>
     // --- Globale Variablen ---
@@ -100,30 +121,39 @@
     const mrXUsername = "{{ mr_x_username }}";
     let ownMarker = null;
     let isMrX = currentUsername === mrXUsername;
-    // Verbleibende Decoys speichern
+    // Decoy
     let mrxRemainingDecoys = {{ mrx_remaining_decoys | default(0) }};
     let isPlacingDecoy = false;
     let tempDecoyMarker = null;
-    // Timer Variablen
+    // Timer
     let mrxUpdateIntervalSeconds = 0;
     let mrxLastBroadcastTimestampMs = 0;
     let timerIntervalId = null;
     const timerDisplayElement = document.getElementById('mrx-timer-display');
+    // Unsichtbarkeit
+    let seekerRemainingInvisibility = {{ seeker_remaining_invisibility | default(0) }};
+    let isInvisible = false; // Lokaler Status, ob Unsichtbarkeit gerade aktiv ist
+    let invisibilityTimeoutId = null; // Für lokalen Timer zum Re-Aktivieren des Buttons
 
     // --- Initialisierung ---
     document.addEventListener('DOMContentLoaded', () => {
         console.log("DOM geladen. Initialisiere Karte und SocketIO.");
         if (isMrX) {
             updateDecoyButtonState(); // Aktualisiert Button mit initialer Anzahl
+        } else {
+            updateInvisibilityButtonState(); // Initialisiere Sucher-Button
         }
         initializeMap();
         initializeSocketIO();
         startLocationWatch();
 
+        // Event Listener
         const foundButton = document.getElementById('found-button');
         if (foundButton) foundButton.addEventListener('click', reportFound);
         const decoyButton = document.getElementById('decoy-button');
         if (decoyButton) decoyButton.addEventListener('click', toggleDecoyPlacement);
+        const invisibilityButton = document.getElementById('invisibility-button');
+        if (invisibilityButton) invisibilityButton.addEventListener('click', activateInvisibility); // Neuer Listener
 
         document.getElementById('back-to-start-button').addEventListener('click', () => {
             window.location.href = "{{ url_for('index') }}";
@@ -176,10 +206,15 @@
             }
 
             updateFinderList(data.players || []);
-            // Update verbleibende Decoys bei Reconnect
+            // Update Decoy Button Status
             if (isMrX && data.mrx_remaining_decoys !== null && data.mrx_remaining_decoys !== undefined) {
                 mrxRemainingDecoys = data.mrx_remaining_decoys;
                 updateDecoyButtonState();
+            }
+            // Update Invis Button Status
+            if (!isMrX && data.seeker_remaining_invisibility !== null && data.seeker_remaining_invisibility !== undefined) {
+                seekerRemainingInvisibility = data.seeker_remaining_invisibility;
+                updateInvisibilityButtonState();
             }
 
             // Timer initialisieren/starten
@@ -222,28 +257,50 @@
             showTemporaryMessage(`${data.username} hat das Spiel verlassen.`, "warning");
         });
 
-        // Bestätigung enthält jetzt verbleibende Decoys
         socket.on('decoy_set_confirmation', (data) => {
             console.log("Decoy wurde vom Server bestätigt:", data);
             showTemporaryMessage("Ablenkungsmanöver gesetzt! Der falsche Standort wird beim nächsten Update gesendet.", "success");
-            // Update Zähler basierend auf Server-Antwort
             if (data.remaining_decoys !== undefined) {
                 mrxRemainingDecoys = data.remaining_decoys;
             } else {
-                mrxRemainingDecoys = 0; // Fallback
+                mrxRemainingDecoys = 0;
             }
-            updateDecoyButtonState(); // Button aktualisieren
+            updateDecoyButtonState();
             if (tempDecoyMarker) { map.removeLayer(tempDecoyMarker); tempDecoyMarker = null; }
         });
 
-        // Listener für Timer-Reset
         socket.on('mrx_update_timer', (data) => {
             if (data.last_broadcast_time !== undefined) {
                 mrxLastBroadcastTimestampMs = data.last_broadcast_time * 1000;
                 console.log(`Timer reset: LastBroadcast=${new Date(mrxLastBroadcastTimestampMs).toLocaleTimeString()}`);
-                updateTimerDisplay(); // Timer sofort aktualisieren
+                updateTimerDisplay();
             } else {
                 console.warn("mrx_update_timer Event ohne Zeitstempel empfangen.");
+            }
+        });
+
+        // Listener für Unsichtbarkeit
+        socket.on('invisibility_activated', (data) => {
+            if (!isMrX) {
+                console.log("Invisibility activated:", data);
+                seekerRemainingInvisibility = data.remaining_uses;
+                isInvisible = true;
+                updateInvisibilityButtonState();
+                showTemporaryMessage(`Du bist jetzt für ${data.duration} Sekunden unsichtbar!`, "info");
+                clearTimeout(invisibilityTimeoutId);
+                invisibilityTimeoutId = setTimeout(() => {
+                    isInvisible = false;
+                    updateInvisibilityButtonState();
+                }, data.duration * 1000);
+            }
+        });
+        socket.on('invisibility_ended', () => {
+             if (!isMrX) {
+                console.log("Invisibility ended.");
+                isInvisible = false;
+                clearTimeout(invisibilityTimeoutId);
+                updateInvisibilityButtonState();
+                showTemporaryMessage("Du bist wieder sichtbar!", "info");
             }
         });
 
@@ -254,6 +311,11 @@
             if (locationWatchId) { navigator.geolocation.clearWatch(locationWatchId); locationWatchId = null; }
             if (isPlacingDecoy) { exitDecoyPlacementMode(); }
             stopTimer();
+            // Deaktiviere alle Aktionsbuttons bei Spielende
+            const mrxActions = document.getElementById('mrx-actions');
+            if (mrxActions) mrxActions.querySelectorAll('button, select').forEach(el => el.disabled = true);
+            const seekerActions = document.getElementById('seeker-actions');
+            if (seekerActions) seekerActions.querySelectorAll('button').forEach(el => el.disabled = true);
         });
 
         socket.on('redirect', (data) => {
@@ -376,7 +438,6 @@
     }
 
     function toggleDecoyPlacement() {
-        // Prüfe verbleibende Decoys
         if (!isMrX || mrxRemainingDecoys <= 0) return;
         isPlacingDecoy = !isPlacingDecoy;
         if (isPlacingDecoy) { enterDecoyPlacementMode(); }
@@ -397,7 +458,7 @@
         console.log("Exiting decoy placement mode.");
         isPlacingDecoy = false;
         document.getElementById('map').classList.remove('decoy-placement-active');
-        updateDecoyButtonState(); // Setzt Text/Status basierend auf verbleibender Anzahl
+        updateDecoyButtonState();
          if (tempDecoyMarker) { map.removeLayer(tempDecoyMarker); tempDecoyMarker = null; }
     }
 
@@ -415,7 +476,6 @@
         exitDecoyPlacementMode();
     }
 
-    // Aktualisiert Text und Status basierend auf mrxRemainingDecoys
     function updateDecoyButtonState() {
         const decoyButton = document.getElementById('decoy-button');
         if (!decoyButton) return;
@@ -426,6 +486,36 @@
         } else {
             decoyButton.disabled = true;
             decoyButton.textContent = "Keine Ablenkungsmanöver mehr";
+        }
+    }
+
+    // --- Sucher Aktionen ---
+    function activateInvisibility() {
+        if (isMrX || seekerRemainingInvisibility <= 0 || isInvisible) {
+            return;
+        }
+        console.log("Requesting invisibility...");
+        if (window.socket && window.socket.connected) {
+            window.socket.emit('activate_invisibility');
+        } else {
+            alert("Keine Verbindung zum Server. Unsichtbarkeit konnte nicht aktiviert werden.");
+        }
+    }
+
+    function updateInvisibilityButtonState() {
+        const invisButton = document.getElementById('invisibility-button');
+        if (!invisButton) return;
+        invisButton.classList.remove('active');
+        if (isInvisible) {
+            invisButton.disabled = true;
+            invisButton.textContent = "Unsichtbar aktiv";
+            invisButton.classList.add('active');
+        } else if (seekerRemainingInvisibility > 0) {
+            invisButton.disabled = false;
+            invisButton.textContent = `Unsichtbarkeit (${seekerRemainingInvisibility} verfügbar)`;
+        } else {
+            invisButton.disabled = true;
+            invisButton.textContent = "Keine Unsichtbarkeit mehr";
         }
     }
 

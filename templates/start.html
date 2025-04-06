@@ -64,10 +64,18 @@
                 <label for="interval">Update-Intervall für Mr. X (Minuten):</label>
                 <input type="number" id="interval" name="interval" min="1" value="5" required>
             </div>
-            <!-- NEU: Input für Anzahl Decoys -->
             <div>
                 <label for="num_decoys">Anzahl Ablenkungsmanöver für Mr. X:</label>
                 <input type="number" id="num_decoys" name="num_decoys" min="0" value="{{ default_decoys }}" required>
+            </div>
+            <!-- NEU: Inputs für Unsichtbarkeit -->
+            <div>
+                <label for="num_invisibility">Anzahl Unsichtbarkeiten pro Sucher:</label>
+                <input type="number" id="num_invisibility" name="num_invisibility" min="0" value="{{ default_invisibility_uses }}" required>
+            </div>
+             <div>
+                <label for="invisibility_duration">Dauer der Unsichtbarkeit (Sekunden):</label>
+                <input type="number" id="invisibility_duration" name="invisibility_duration" min="1" value="{{ default_invisibility_duration }}" required>
             </div>
             <button type="submit">Spiel starten</button>
         </form>
