@@ -22,6 +22,12 @@ docker run -p 1432:1432 jkramer5103/x-hunter:latest
 ```
 The server now runs on port 1432
 
+The Standard Login is:
+user: root
+password: password
+
+ADD A NEW ADMIN USER AND DELETE THE STANDARD ONE AS SOON AS POSSIBLE
+
 ## Installation guide
 
 Clone the project
@@ -54,3 +60,9 @@ Start the server
 python3 app.py
 ```
 The server now runs on port 1432
+
+The Standard Login is:
+user: root
+password: password
+
+ADD A NEW ADMIN USER AND DELETE THE STANDARD ONE AS SOON AS POSSIBLE
