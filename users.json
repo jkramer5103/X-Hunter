@@ -1,6 +1,6 @@
 {
   "root": {
-    "password": "pbkdf2:sha256:600000$27jDOoQWXlzEwMOx$c7fdfd2cc8f4f3a3dac1b2d7d340ec71fe1c06cadd5348ffa0c028e0a862e7b2",
+    "password": "pbkdf2:sha256:600000$5c3pcTDFQnLt2P62$8b1e71d5e16aacabe6175917d63f21f69fcdcad62937e92f4fc4cfc302a066db",
     "is_admin": true
   }
 }
