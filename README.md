@@ -1,7 +1,7 @@
 
 # X-Hunter
 
-In X-Hunter, experience the thrill of the chase as players team up to hunt the elusive Mr. X! Both Mr. X and the hunters strategically use public transportation to traverse the game map.
+In X-Hunter, experience the thrill of the chase as players team up to hunt the elusive Mr. X in Real Life! Both Mr. X and the hunters strategically use public transportation to traverse your City.
 
 The game features:
 
