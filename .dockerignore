@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE/Editor specific files
+.vscode/
+.idea/
+
+# Git files
+.git/
+.gitignore
+
+# Docker files (falls du sie nicht im Image brauchst)
+Dockerfile
+.dockerignore
+
+# Andere temporäre Dateien oder Logs
+*.log
+real/

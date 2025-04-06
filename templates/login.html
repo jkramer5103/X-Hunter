@@ -3,35 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Live GPS Tracker</title>
+    <title>Login - Mr. X Spiel</title>
+    <!-- Link zur externen CSS-Datei -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        /* Einfaches Inline-Styling für die Demo */
-        body { font-family: sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
-        label { display: block; margin-bottom: 5px; }
-        input[type="text"], input[type="password"] { width: calc(100% - 12px); padding: 5px; margin-bottom: 15px; border: 1px solid #ccc; }
-        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; }
-        button:hover { background-color: #0056b3; }
-        .error { color: red; margin-top: 10px; }
-    </style>
 </head>
-<body>
-    <h1>Anmelden</h1>
-    {% if error %}
-        <p class="error">{{ error }}</p>
-    {% endif %}
-    <form method="post">
-        <div>
-            <label for="username">Benutzername:</label>
-            <input type="text" id="username" name="username" required>
+<!-- Füge die Klasse login-body hinzu -->
+<body class="login-body">
+
+    <div class="login-container">
+        <h1>Anmelden</h1>
+
+        <!-- Flash Nachrichten anzeigen -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <ul class=flash-messages>
+            {% for category, message in messages %}
+              <!-- Verwende die Kategorie als CSS-Klasse -->
+              <li class="flash-{{ category }}">{{ message }}</li>
+            {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
+
+        <form method="post">
+            <div>
+                <label for="username">Benutzername:</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div>
+                <label for="password">Passwort:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit">Login</button>
+        </form>
+        <!-- Optional: Link zur Registrierung oder Passwort vergessen hinzufügen -->
+        <!--
+        <div style="text-align: center; margin-top: 20px;">
+            <a href="#">Passwort vergessen?</a> | <a href="#">Registrieren</a>
         </div>
-        <div>
-            <label for="password">Passwort:</label>
-            <input type="password" id="password" name="password" required>
-        </div>
-        <button type="submit">Login</button>
-    </form>
-    <hr>
-    </ul>
+        -->
+    </div>
+
 </body>
 </html>

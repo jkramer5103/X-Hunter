@@ -1,31 +1,208 @@
 /* static/style.css */
 
-/* (Styles für Login, Startseite, Flash-Nachrichten etc. beibehalten) */
+/* --- Globale Styles --- */
+body {
+    font-family: sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f4f7f6; /* Heller Standardhintergrund */
+    color: #333;
+}
 
-/* Entferne alle .profile-marker... Klassen */
+/* --- Styles speziell für die Login-Seite --- */
+.login-body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh; /* Nimmt die volle Höhe des Viewports ein */
+    background-color: #e9ecef; /* Etwas dunklerer Hintergrund für Kontrast */
+}
 
-/* Optional: Füge die neuen Marker-Styles hier ein,
-   wenn du sie nicht im <style>-Block von map.html haben willst */
-/*
-.player-marker {
-    background-color: rgba(51, 136, 255, 0.8);
-    border: 2px solid white;
-    border-radius: 50%;
-    box-shadow: 0 0 5px rgba(0,0,0,0.5);
-    width: 15px;
-    height: 15px;
+.login-container {
+    background-color: #ffffff; /* Weißer Hintergrund für die Box */
+    padding: 30px 40px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); /* Weicher Schatten */
+    width: 100%;
+    max-width: 400px; /* Maximale Breite der Login-Box */
+    box-sizing: border-box;
 }
-.own-player-marker {
-    background-color: rgba(0, 123, 255, 0.9);
-    border: 2px solid white;
-    width: 18px;
-    height: 18px;
+
+.login-container h1 {
+    text-align: center;
+    color: #495057; /* Dunkleres Grau für den Titel */
+    margin-top: 0; /* Entferne oberen Standardabstand */
+    margin-bottom: 25px;
+    font-size: 1.8em;
+    font-weight: 600;
 }
-.mrx-marker {
-    background-color: rgba(217, 83, 79, 0.9);
-    border: 2px solid white;
-    width: 18px;
-    height: 18px;
-    box-shadow: 0 0 8px rgba(255, 0, 0, 0.8);
+
+.login-container label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #555;
+    font-size: 0.95em;
 }
-*/
+
+.login-container input[type="text"],
+.login-container input[type="password"] {
+    width: 100%;
+    padding: 12px 15px;
+    margin-bottom: 20px;
+    border: 1px solid #ced4da; /* Hellerer Rand */
+    border-radius: 4px;
+    box-sizing: border-box; /* Wichtig bei width: 100% und padding */
+    font-size: 1em;
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.login-container input[type="text"]:focus,
+.login-container input[type="password"]:focus {
+    border-color: #80bdff; /* Blauer Rand bei Fokus */
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25); /* Leichter Schein bei Fokus */
+}
+
+.login-container button {
+    width: 100%;
+    padding: 12px 15px;
+    background-color: #007bff; /* Blauer Button */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1.1em;
+    font-weight: 600;
+    transition: background-color 0.2s ease-in-out;
+    margin-top: 10px; /* Etwas Abstand nach oben */
+}
+
+.login-container button:hover {
+    background-color: #0056b3; /* Dunkleres Blau bei Hover */
+}
+
+/* --- Flash Nachrichten Styles (Generisch) --- */
+.flash-messages {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 20px 0; /* Standardabstand unten */
+}
+.flash-messages li {
+    padding: 12px 15px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    font-size: 0.95em;
+    border: 1px solid transparent;
+}
+.flash-success { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
+.flash-error { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+.flash-warning { background-color: #fcf8e3; color: #8a6d3b; border-color: #faebcc; }
+.flash-info { background-color: #d9edf7; color: #31708f; border-color: #bce8f1; }
+.flash-danger { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; } /* Alias für error */
+
+
+/* --- Beispiel-Styles für andere Seiten (start.html, manage_users.html) --- */
+/* Du solltest diese anpassen oder durch deine vorhandenen ersetzen */
+
+/* Styles für Seiten mit zentriertem Container (wie start.html, manage_users.html) */
+.content-container {
+    max-width: 700px; /* Oder eine andere passende Breite */
+    margin: 30px auto;
+    padding: 20px;
+    background-color: #ffffff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.content-container h1,
+.content-container h2 {
+    text-align: center;
+    color: #333;
+    margin-bottom: 25px;
+}
+
+.user-info { /* Für den Header auf start.html etc. */
+    text-align: right;
+    margin-bottom: 15px;
+    padding: 10px 20px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    color: #666;
+}
+.user-info a {
+    color: #007bff;
+    text-decoration: none;
+    margin-left: 10px;
+}
+.user-info a:hover {
+    text-decoration: underline;
+}
+
+/* Styles für Formulare auf anderen Seiten */
+.styled-form {
+    background-color: #fdfdfd;
+    padding: 25px;
+    border-radius: 5px;
+    border: 1px solid #eee;
+    margin-bottom: 20px;
+}
+.styled-form label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #555;
+}
+.styled-form select,
+.styled-form input[type="number"],
+.styled-form input[type="text"],
+.styled-form input[type="password"] {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 20px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+.styled-form button {
+    padding: 12px 20px;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    width: 100%;
+    font-size: 1.1em;
+    transition: background-color 0.2s ease-in-out;
+}
+.styled-form button.submit-button { /* Z.B. für Spiel starten */
+     background-color: #5cb85c;
+}
+.styled-form button.submit-button:hover {
+     background-color: #4cae4c;
+}
+.styled-form button.action-button { /* Z.B. für Benutzer hinzufügen */
+     background-color: #5bc0de;
+}
+.styled-form button.action-button:hover {
+     background-color: #31b0d5;
+}
+
+
+/* Styles für Benutzerliste (manage_users.html) */
+.user-list { list-style: none; padding: 0; margin-bottom: 30px; }
+.user-list li { background-color: #fff; border: 1px solid #ddd; padding: 10px 15px; margin-bottom: 10px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.user-list .user-info-item { display: flex; align-items: center; gap: 10px; } /* Umbenannt, um Konflikt zu vermeiden */
+.user-list .user-info-item span { font-weight: bold; }
+.user-list .admin-badge { background-color: #f0ad4e; color: white; padding: 2px 6px; font-size: 0.8em; border-radius: 3px; font-weight: normal; }
+.user-list .actions { display: flex; gap: 8px; }
+.user-list form { margin: 0; }
+.user-list button { border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 0.9em; color: white; }
+.user-list .delete-btn { background-color: #d9534f; }
+.user-list .delete-btn:hover { background-color: #c9302c; }
+.user-list .admin-btn { background-color: #5bc0de; }
+.user-list .admin-btn:hover { background-color: #31b0d5; }
+
+/* Styles für map.html (Header etc.) können hier auch zentralisiert werden */
+/* ... */
+
