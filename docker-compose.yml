@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  x-hunter-app:
+    build: .
+    ports:
+      - "1432:1432"
+    volumes:
+      - ./users.json:/app/users.json
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1432/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
