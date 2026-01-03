@@ -9,8 +9,10 @@ WORKDIR /app
 # Schritt 3: Abhängigkeiten installieren
 # Kopiere zuerst nur die requirements.txt, um Docker's Caching zu nutzen.
 COPY requirements.txt .
-# Installiere die Pakete. --no-cache-dir hält das Image kleiner.
-RUN pip install --no-cache-dir -r requirements.txt
+# Installiere die Pakete und curl für Health Check. --no-cache-dir hält das Image kleiner.
+RUN apt-get update && apt-get install -y curl && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Schritt 4: App-Code kopieren
 # Kopiere den gesamten Inhalt des aktuellen Verzeichnisses (.) in das Arbeitsverzeichnis (/app) im Container.

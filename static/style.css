@@ -82,6 +82,16 @@ body {
     background-color: #0056b3; /* Dunkleres Blau bei Hover */
 }
 
+.login-container .setup-button {
+    background-color: #28a745; /* Grüner Button für Setup */
+    font-weight: 600;
+    font-size: 1.1em;
+}
+
+.login-container .setup-button:hover {
+    background-color: #218838; /* Dunkleres Grün bei Hover */
+}
+
 /* --- Flash Nachrichten Styles (Generisch) --- */
 .flash-messages {
     list-style: none;

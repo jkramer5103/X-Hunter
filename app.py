@@ -9,46 +9,47 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import threading # Wird für Timer benötigt, aber wir verwenden socketio.sleep
 
 # --- Lade/Speichere Benutzerdaten ---
-USERS_FILE = "users.json"
+USERS_FILE = "data/users.json"
 loaded_users = {}
+
+def ensure_data_directory():
+    """Stellt sicher, dass das data-Verzeichnis existiert."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, "data")
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+        print(f"Data-Verzeichnis erstellt: {data_dir}")
 
 def load_users_from_json():
     """Lädt Benutzerdaten aus der JSON-Datei."""
     global loaded_users
     try:
+        ensure_data_directory()
         base_dir = os.path.dirname(os.path.abspath(__file__))
         users_file_path = os.path.join(base_dir, USERS_FILE)
-        # Erstelle die Datei mit einem leeren Objekt, falls sie nicht existiert
+        
         if not os.path.exists(users_file_path):
-            with open(users_file_path, 'w', encoding='utf-8') as f:
-                # Erstelle initialen Admin, wenn Datei neu ist
-                initial_admin_user = "jaron"
-                initial_admin_pass = "admin123" # Setze ein sicheres Standardpasswort!
-                initial_users = {
-                    initial_admin_user: {
-                        "password": generate_password_hash(initial_admin_pass),
-                        "is_admin": True
-                    }
-                }
-                json.dump(initial_users, f, indent=2)
-            print(f"{USERS_FILE} nicht gefunden, Datei mit initialem Admin '{initial_admin_user}' erstellt.")
-            loaded_users = initial_users
-            return
-
+            loaded_users = {}
+            return False  # No users file exists
+            
         with open(users_file_path, 'r', encoding='utf-8') as f:
             loaded_users = json.load(f)
         print(f"Benutzerdaten erfolgreich aus {USERS_FILE} geladen.")
+        return True  # Users loaded successfully
     except json.JSONDecodeError:
         print(f"FEHLER: Konnte JSON aus {USERS_FILE} nicht dekodieren. Bitte Format prüfen.")
-        loaded_users = {} # Mit leerem Dict starten bei Fehler
+        loaded_users = {}
+        return False
     except Exception as e:
         print(f"FEHLER: Unerwarteter Fehler beim Laden von {USERS_FILE}: {e}")
-        loaded_users = {} # Mit leerem Dict starten bei Fehler
+        loaded_users = {}
+        return False
 
 # Funktion zum Speichern der Benutzerdaten
 def save_users_to_json():
     """Speichert das aktuelle loaded_users Dictionary in die JSON-Datei."""
     try:
+        ensure_data_directory()
         base_dir = os.path.dirname(os.path.abspath(__file__))
         users_file_path = os.path.join(base_dir, USERS_FILE)
         with open(users_file_path, 'w', encoding='utf-8') as f:
@@ -59,6 +60,10 @@ def save_users_to_json():
     except Exception as e:
         print(f"FEHLER: Konnte Benutzerdaten nicht in {USERS_FILE} speichern: {e}")
         return False
+
+def users_exist():
+    """Prüft, ob Benutzer existieren."""
+    return len(loaded_users) > 0
 
 # Lade Benutzer beim Start
 load_users_from_json()
@@ -145,8 +150,14 @@ def reset_game_state(notify_clients=True):
 # --- Routen ---
 @app.route("/")
 def index():
-    if not session.get("username"): return redirect(url_for("login"))
-    if game_state["active"]: return redirect(url_for("map_page"))
+    # Check if users exist, if not redirect to setup
+    if not users_exist():
+        return redirect(url_for("setup"))
+    
+    if not session.get("username"): 
+        return redirect(url_for("login"))
+    if game_state["active"]: 
+        return redirect(url_for("map_page"))
     else:
         registered_users = list(loaded_users.keys())
         is_admin = loaded_users.get(session['username'], {}).get('is_admin', False)
@@ -209,6 +220,46 @@ def start_game():
         'invisibility_duration': invisibility_duration
     })
     return redirect(url_for("map_page"))
+
+@app.route("/setup", methods=["GET", "POST"])
+def setup():
+    # If users already exist, redirect to login
+    if users_exist():
+        return redirect(url_for("login"))
+    
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        password_confirm = request.form.get("password_confirm", "")
+        
+        # Validation
+        if not username or not password:
+            flash("Benutzername und Passwort sind erforderlich.", "error")
+            return render_template("setup.html")
+        
+        if password != password_confirm:
+            flash("Passwörter stimmen nicht überein.", "error")
+            return render_template("setup.html")
+        
+        if len(password) < 6:
+            flash("Passwort muss mindestens 6 Zeichen lang sein.", "error")
+            return render_template("setup.html")
+        
+        # Create first admin user
+        loaded_users[username] = {
+            "password": generate_password_hash(password),
+            "is_admin": True
+        }
+        
+        if save_users_to_json():
+            flash("Admin-Benutzer erfolgreich erstellt! Sie können sich jetzt anmelden.", "success")
+            return redirect(url_for("login"))
+        else:
+            flash("Fehler beim Speichern des Benutzers. Bitte versuchen Sie es erneut.", "error")
+            loaded_users.clear()  # Clear the user since we couldn't save
+            return render_template("setup.html")
+    
+    return render_template("setup.html")
 
 @app.route("/login", methods=["GET", "POST"])
 def login():

@@ -3,16 +3,16 @@ version: '3.8'
 services:
   x-hunter-app:
     build: .
-    ports:
-      - "1432:1432"
+#    ports: Not needed bc of Coolify
+#      - "1432:1432"
     volumes:
-      - ./users.json:/app/users.json
+      - ./data:/app/data
     environment:
       - FLASK_ENV=production
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:1432/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+#    healthcheck:    Coolify is a bitch, so i wont do a healthckeck
+#      test: ["CMD", "curl", "-f", "http://localhost:1432/"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 40s
