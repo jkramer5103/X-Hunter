@@ -34,6 +34,13 @@ def load_users_from_json():
             
         with open(users_file_path, 'r', encoding='utf-8') as f:
             loaded_users = json.load(f)
+        
+        # Add has_password field for backward compatibility
+        for username, user_data in loaded_users.items():
+            if "has_password" not in user_data:
+                # If password exists and is not None, user has password
+                loaded_users[username]["has_password"] = user_data.get("password") is not None
+        
         print(f"Benutzerdaten erfolgreich aus {USERS_FILE} geladen.")
         return True  # Users loaded successfully
     except json.JSONDecodeError:
@@ -229,30 +236,21 @@ def setup():
     
     if request.method == "POST":
         username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-        password_confirm = request.form.get("password_confirm", "")
         
         # Validation
-        if not username or not password:
-            flash("Benutzername und Passwort sind erforderlich.", "error")
+        if not username:
+            flash("Benutzername ist erforderlich.", "error")
             return render_template("setup.html")
         
-        if password != password_confirm:
-            flash("Passwörter stimmen nicht überein.", "error")
-            return render_template("setup.html")
-        
-        if len(password) < 6:
-            flash("Passwort muss mindestens 6 Zeichen lang sein.", "error")
-            return render_template("setup.html")
-        
-        # Create first admin user
+        # Create first admin user without password
         loaded_users[username] = {
-            "password": generate_password_hash(password),
+            "password": None,  # No password initially
+            "has_password": False,  # Track if password has been set
             "is_admin": True
         }
         
         if save_users_to_json():
-            flash("Admin-Benutzer erfolgreich erstellt! Sie können sich jetzt anmelden.", "success")
+            flash("Admin-Benutzer erfolgreich erstellt! Sie können sich jetzt anmelden und Ihr Passwort festlegen.", "success")
             return redirect(url_for("login"))
         else:
             flash("Fehler beim Speichern des Benutzers. Bitte versuchen Sie es erneut.", "error")
@@ -265,17 +263,90 @@ def setup():
 def login():
     if request.method == "POST":
         username = request.form.get("username")
-        password = request.form.get("password")
         user_data = loaded_users.get(username)
+        
+        if not user_data:
+            flash("Benutzername nicht gefunden", "error")
+            return render_template("login_username.html")
+        
+        # Store username in session temporarily
+        session["temp_username"] = username
+        
+        # Check if user has password set
+        if user_data.get("has_password", False):
+            # User has password, redirect to password entry
+            return redirect(url_for("login_password"))
+        else:
+            # First-time user, redirect to password setup
+            return redirect(url_for("login_setup_password"))
+    
+    if "username" in session: 
+        return redirect(url_for("index"))
+    
+    return render_template("login_username.html")
+
+@app.route("/login/password", methods=["GET", "POST"])
+def login_password():
+    # Get username from temporary session
+    username = session.get("temp_username")
+    if not username:
+        return redirect(url_for("login"))
+    
+    user_data = loaded_users.get(username)
+    if not user_data or not user_data.get("has_password", False):
+        return redirect(url_for("login"))
+    
+    if request.method == "POST":
+        password = request.form.get("password")
         if user_data and check_password_hash(user_data.get("password", ""), password):
+            # Clear temporary username and set permanent session
+            session.pop("temp_username", None)
             session["username"] = username
             print(f"User '{username}' logged in.")
             return redirect(url_for("index"))
         else:
-            flash("Ungültiger Benutzername oder Passwort", "error")
-            return redirect(url_for("login"))
-    if "username" in session: return redirect(url_for("index"))
-    return render_template("login.html")
+            flash("Ungültiges Passwort", "error")
+    
+    return render_template("login_password.html", username=username)
+
+@app.route("/login/setup-password", methods=["GET", "POST"])
+def login_setup_password():
+    # Get username from temporary session
+    username = session.get("temp_username")
+    if not username:
+        return redirect(url_for("login"))
+    
+    user_data = loaded_users.get(username)
+    if not user_data or user_data.get("has_password", False):
+        return redirect(url_for("login"))
+    
+    if request.method == "POST":
+        password = request.form.get("password")
+        password_confirm = request.form.get("password_confirm")
+        
+        # Validation
+        if not password or not password_confirm:
+            flash("Passwort und Bestätigung sind erforderlich.", "error")
+        elif password != password_confirm:
+            flash("Passwörter stimmen nicht überein.", "error")
+        elif len(password) < 6:
+            flash("Passwort muss mindestens 6 Zeichen lang sein.", "error")
+        else:
+            # Set password for user
+            loaded_users[username]["password"] = generate_password_hash(password)
+            loaded_users[username]["has_password"] = True
+            
+            if save_users_to_json():
+                # Clear temporary username and set permanent session
+                session.pop("temp_username", None)
+                session["username"] = username
+                print(f"User '{username}' set password and logged in.")
+                flash("Passwort erfolgreich festgelegt!", "success")
+                return redirect(url_for("index"))
+            else:
+                flash("Fehler beim Speichern des Passworts. Bitte versuchen Sie es erneut.", "error")
+    
+    return render_template("login_setup_password.html", username=username)
 
 @app.route("/map")
 def map_page():
@@ -298,11 +369,14 @@ def map_page():
 @app.route("/logout")
 def logout():
     username = session.pop("username", None)
+    temp_username = session.pop("temp_username", None)
     if username:
         print(f"User '{username}' logged out.")
         if game_state["active"] and username == game_state["mr_x"]:
             print(f"Mr. X ({username}) explicitly logged out. Ending game.")
             reset_game_state()
+    elif temp_username:
+        print(f"Temporary user '{temp_username}' session cleared.")
     return redirect(url_for("login"))
 
 @app.route('/manage_users', methods=['GET', 'POST'])
@@ -313,14 +387,17 @@ def manage_users():
         action = request.form.get('action')
         if action == 'add':
             new_username = request.form.get('new_username')
-            new_password = request.form.get('new_password')
             is_new_admin = request.form.get('is_new_admin') == 'on'
-            if not new_username or not new_password: flash("Benutzername und Passwort dürfen nicht leer sein.", "error")
+            if not new_username: flash("Benutzername darf nicht leer sein.", "error")
             elif new_username in loaded_users: flash(f"Benutzername '{new_username}' existiert bereits.", "error")
             else:
-                hashed_password = generate_password_hash(new_password)
-                loaded_users[new_username] = { "password": hashed_password, "is_admin": is_new_admin }
-                if save_users_to_json(): flash(f"Benutzer '{new_username}' {'als Admin ' if is_new_admin else ''}erfolgreich hinzugefügt.", "success"); print(f"User added: {new_username} (Admin: {is_new_admin})")
+                # Create user without password - will be set on first login
+                loaded_users[new_username] = { 
+                    "password": None,  # No password initially
+                    "has_password": False,  # Track if password has been set
+                    "is_admin": is_new_admin 
+                }
+                if save_users_to_json(): flash(f"Benutzer '{new_username}' {'als Admin ' if is_new_admin else ''}erfolgreich hinzugefügt. Passwort wird beim ersten Login festgelegt.", "success"); print(f"User added: {new_username} (Admin: {is_new_admin})")
                 else: flash("Fehler beim Speichern der Benutzerdaten.", "error"); del loaded_users[new_username]
             return redirect(url_for('manage_users'))
         elif action == 'delete':

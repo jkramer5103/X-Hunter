@@ -9,10 +9,11 @@
 <body class="login-body">
 
     <div class="login-container">
-        <h1>🎯 Willkommen bei Mr. X!</h1>
+        <h1> Willkommen bei Mr. X!</h1>
         <p style="text-align: center; margin-bottom: 30px; color: #666;">
             Dies ist die erste Einrichtung Ihrer Anwendung.<br>
-            Bitte erstellen Sie Ihren Administrator-Account.
+            Bitte erstellen Sie Ihren Administrator-Account.<br>
+            <small>Das Passwort wird beim ersten Login festgelegt.</small>
         </p>
 
         <!-- Flash Nachrichten anzeigen -->
@@ -31,16 +32,6 @@
                 <label for="username">Admin-Benutzername:</label>
                 <input type="text" id="username" name="username" required 
                        placeholder="z.B. admin" minlength="3" maxlength="20">
-            </div>
-            <div>
-                <label for="password">Passwort:</label>
-                <input type="password" id="password" name="password" required 
-                       placeholder="Mindestens 6 Zeichen" minlength="6">
-            </div>
-            <div>
-                <label for="password_confirm">Passwort bestätigen:</label>
-                <input type="password" id="password_confirm" name="password_confirm" required 
-                       placeholder="Passwort wiederholen">
             </div>
             <button type="submit" class="setup-button">Admin-Account erstellen</button>
         </form>

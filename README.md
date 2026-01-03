@@ -75,7 +75,7 @@ The application will be available at `http://localhost:1432`
 - `SECRET_KEY`: Flask secret key (defaults to a development key)
 - `FLASK_ENV`: Environment mode (development/production)
 
-## 🎯 Game Features
+## Game Features
 
 ### Core Gameplay
 - **Real-time movement tracking** with WebSocket updates
