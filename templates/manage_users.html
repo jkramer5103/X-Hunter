@@ -20,6 +20,8 @@
         .user-list .delete-btn:hover { background-color: #c9302c; }
         .user-list .admin-btn { background-color: #5bc0de; } /* Blau für Admin-Aktionen */
         .user-list .admin-btn:hover { background-color: #31b0d5; }
+        .user-list .reset-btn { background-color: #f0ad4e; } /* Orange für Passwort-Reset */
+        .user-list .reset-btn:hover { background-color: #ec971f; }
         .add-user-form { background-color: #fff; padding: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px;}
         .add-user-form label { display: block; margin-bottom: 5px; font-weight: bold; }
         .add-user-form input[type="text"], .add-user-form input[type="password"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; }
@@ -84,6 +86,12 @@
                     {% endif %}
                 </div>
                 <div class="actions">
+                    <!-- Passwort zurücksetzen -->
+                    <form method="post" onsubmit="return confirm('Passwort für \'{{ user_data.username }}\' wirklich zurücksetzen? Der Benutzer muss dann ein neues Passwort festlegen.');">
+                        <input type="hidden" name="action" value="reset_password">
+                        <input type="hidden" name="username_to_modify" value="{{ user_data.username }}">
+                        <button type="submit" class="reset-btn">Passwort zurücksetzen</button>
+                    </form>
                     <!-- Admin-Rechte verwalten -->
                     {% if user_data.is_admin %}
                         <form method="post" onsubmit="return confirm('Admin-Rechte für \'{{ user_data.username }}\' wirklich entziehen?');">

@@ -438,6 +438,24 @@ def manage_users():
                     if save_users_to_json(): flash(f"'{username_to_revoke}' wurden die Admin-Rechte entzogen.", "success"); print(f"Admin revoked: {username_to_revoke}")
                     else: flash("Fehler beim Speichern nach Entzug der Admin-Rechte.", "error"); loaded_users[username_to_revoke]['is_admin'] = True
             return redirect(url_for('manage_users'))
+        elif action == 'reset_password':
+            username_to_reset = request.form.get('username_to_modify')
+            if not username_to_reset: flash("Kein Benutzer ausgewählt.", "error")
+            elif username_to_reset not in loaded_users: flash(f"Benutzer '{username_to_reset}' nicht gefunden.", "error")
+            else:
+                # Reset password - clear password and set has_password to False
+                loaded_users[username_to_reset]['password'] = None
+                loaded_users[username_to_reset]['has_password'] = False
+                if save_users_to_json(): 
+                    flash(f"Passwort für '{username_to_reset}' wurde zurückgesetzt. Der Benutzer muss beim nächsten Login ein neues Passwort festlegen.", "success")
+                    print(f"Password reset for user: {username_to_reset}")
+                else: 
+                    flash("Fehler beim Zurücksetzen des Passworts.", "error")
+                    # Restore original state if save failed
+                    original_user = load_users_from_json()
+                    if username_to_reset in loaded_users:
+                        loaded_users[username_to_reset] = original_user.get(username_to_reset, loaded_users[username_to_reset])
+            return redirect(url_for('manage_users'))
     users_list_with_status = []
     for username, data in loaded_users.items():
         if username != current_admin_username: users_list_with_status.append({ 'username': username, 'is_admin': data.get('is_admin', False) })
