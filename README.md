@@ -55,7 +55,8 @@ X-Hunter/
 ├── static/
 │   └── style.css        # Application styles
 └── data/                # Persistent data (created automatically)
-    └── users.json       # User database
+    ├── users.db         # SQLite user database
+    └── users.json       # Legacy JSON source (auto-migrated if present)
 ```
 
 ## 🛠️ Development Setup
@@ -82,7 +83,7 @@ The application will be available at `http://localhost:1432`
 - **Chat system** for player coordination
 - **Admin controls** for game management
 - **User management** with role-based permissions
-- **Persistent data storage** in JSON format
+- **Persistent data storage** in SQLite (with legacy JSON auto-migration)
 
 ### Admin Features
 - Start and stop games
@@ -150,12 +151,12 @@ docker-compose build --no-cache
 **Setup page not appearing:**
 - Ensure the `data/` directory is writable
 - Check browser console for JavaScript errors
-- Verify no existing `users.json` file
+- Verify no existing `users.db` file (or remove it for a fresh setup)
 
 **Data persistence issues:**
 - Ensure the `./data` directory exists on the host
 - Check Docker volume permissions
-- Verify container has write access
+- Verify container has write access to `users.db`
 
 ### Getting Help
 - Check the application logs: `docker-compose logs -f`
