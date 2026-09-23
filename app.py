@@ -1,5 +1,8 @@
 import json
 import os
+import hashlib
+import secrets
+import urllib.request
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -7,7 +10,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, flash, redirect, render_template, request, session, url_for, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -194,6 +197,7 @@ class GameState:
     update_interval_minutes: int = 5
     mr_x_last_broadcast_time: float = 0
     mr_x_last_known_location: dict[str, float] | None = None
+    mr_x_public_location: dict[str, float] | None = None
     players: dict[str, PlayerState] = field(default_factory=dict)
     mrx_disconnect_task_pending: bool = False
     mrx_total_decoys: int = DEFAULT_DECOYS
@@ -209,6 +213,7 @@ class GameState:
         self.update_interval_minutes = 5
         self.mr_x_last_broadcast_time = 0
         self.mr_x_last_known_location = None
+        self.mr_x_public_location = None
         self.players = {}
         self.mrx_disconnect_task_pending = False
         self.mrx_total_decoys = DEFAULT_DECOYS
@@ -224,6 +229,120 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "sehr-geheim-fuer-spiel-
 socketio = SocketIO(app, async_mode="eventlet")
 user_repo = UserRepository(USERS_DB_FILE, USERS_JSON_FILE)
 game = GameState()
+
+with user_repo._connect() as conn:
+    conn.execute("CREATE TABLE IF NOT EXISTS native_tokens (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, created_at INTEGER NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS native_push_tokens (expo_token TEXT PRIMARY KEY, username TEXT NOT NULL)")
+    conn.commit()
+
+
+def native_user() -> str | None:
+    bearer = request.headers.get("Authorization", "")
+    if not bearer.startswith("Bearer "):
+        return None
+    digest = hashlib.sha256(bearer[7:].encode()).hexdigest()
+    with user_repo._connect() as conn:
+        row = conn.execute("SELECT username FROM native_tokens WHERE token_hash = ?", (digest,)).fetchone()
+    return row["username"] if row and user_repo.get_user(row["username"]) else None
+
+
+@app.post("/api/native/login")
+def native_login():
+    payload = request.get_json(silent=True) or {}
+    username, password = payload.get("username", ""), payload.get("password", "")
+    user = user_repo.get_user(username)
+    if not user or not user.get("has_password") or not check_password_hash(user.get("password") or "", password):
+        return jsonify(error="Ungültige Zugangsdaten oder Passwort noch nicht eingerichtet."), 401
+    token = secrets.token_urlsafe(48)
+    with user_repo._connect() as conn:
+        conn.execute("INSERT INTO native_tokens VALUES (?, ?, ?)", (hashlib.sha256(token.encode()).hexdigest(), username, int(time.time())))
+        conn.commit()
+    return jsonify(token=token, username=username)
+
+
+@app.post("/api/native/logout")
+def native_logout():
+    username = native_user()
+    if not username:
+        return jsonify(error="Nicht angemeldet"), 401
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ")
+    with user_repo._connect() as conn:
+        conn.execute("DELETE FROM native_tokens WHERE token_hash = ?", (hashlib.sha256(token.encode()).hexdigest(),))
+        conn.commit()
+    return jsonify(ok=True)
+
+
+@app.post("/api/native/push")
+def native_push():
+    username = native_user()
+    if not username:
+        return jsonify(error="Nicht angemeldet"), 401
+    token = (request.get_json(silent=True) or {}).get("expo_token", "")
+    if not isinstance(token, str) or not token.startswith("ExponentPushToken[") or len(token) > 200:
+        return jsonify(error="Ungültiger Push-Token"), 400
+    with user_repo._connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO native_push_tokens VALUES (?, ?)", (token, username))
+        conn.commit()
+    return jsonify(ok=True)
+
+
+def send_native_push(title: str, body: str, recipients: list[str]) -> None:
+    if not recipients:
+        return
+    with user_repo._connect() as conn:
+        rows = conn.execute("SELECT expo_token, username FROM native_push_tokens").fetchall()
+    messages = [{"to": row["expo_token"], "title": title, "body": body, "sound": "default"}
+                for row in rows if row["username"] in recipients]
+    if not messages:
+        return
+    try:
+        payload = json.dumps(messages).encode()
+        req = urllib.request.Request("https://exp.host/--/api/v2/push/send", data=payload,
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=8).close()
+    except Exception as exc:
+        print(f"Push delivery request failed: {exc}")
+
+
+@app.get("/api/native/state")
+def native_state():
+    username = native_user()
+    if not username:
+        return jsonify(error="Nicht angemeldet"), 401
+    player = game.players.get(username)
+    locations = {}
+    for name, member in game.players.items():
+        if member.invisible_until and member.invisible_until > time.time() and name != username:
+            continue
+        if name == game.mr_x:
+            visible = game.mr_x_last_known_location if name == username else game.mr_x_public_location
+            if visible:
+                locations[name] = visible
+        elif member.last_location:
+            locations[name] = member.last_location
+    return jsonify(username=username, is_admin=bool(user_repo.get_user(username).get("is_admin")), active=game.active,
+        mr_x=game.mr_x, players=list(game.players), locations=locations,
+        interval=game.update_interval_minutes, last_broadcast=game.mr_x_last_broadcast_time,
+        decoys=game.mrx_remaining_decoys if username == game.mr_x else None,
+        invisibility=player.remaining_invisibility if player and username != game.mr_x else game.seeker_invisibility_uses)
+
+
+@app.post("/api/native/location")
+def native_location():
+    username = native_user()
+    if not username:
+        return jsonify(error="Nicht angemeldet"), 401
+    if not game.active:
+        return jsonify(error="Kein aktives Spiel"), 409
+    payload = request.get_json(silent=True) or {}
+    try:
+        lat, lon = float(payload["lat"]), float(payload["lon"])
+        if not -90 <= lat <= 90 or not -180 <= lon <= 180:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="Ungültige Koordinaten"), 400
+    publish_location(username, lat, lon)
+    return jsonify(ok=True)
 
 
 def current_user() -> str | None:
@@ -364,6 +483,7 @@ def start_game():
     game.update_interval_minutes = interval_minutes
     game.mr_x_last_broadcast_time = 0
     game.mr_x_last_known_location = None
+    game.mr_x_public_location = None
     game.players = {}
     game.mrx_disconnect_task_pending = False
     game.mrx_total_decoys = num_decoys
@@ -383,6 +503,7 @@ def start_game():
             "invisibility_duration": invisibility_duration,
         },
     )
+    socketio.start_background_task(send_native_push, "Die Jagd beginnt", "Ein neues Spiel wurde gestartet.", list(users))
     flash(f"Spiel gestartet! {selected_mr_x} ist Mr. X.", "success")
     return redirect(url_for("map_page"))
 
@@ -593,8 +714,16 @@ def manage_users():
 
 
 @socketio.on("connect")
-def handle_connect():
+def handle_connect(auth=None):
     username = current_user()
+    if not username and isinstance(auth, dict):
+        token = auth.get("token", "")
+        if isinstance(token, str):
+            with user_repo._connect() as conn:
+                row = conn.execute("SELECT username FROM native_tokens WHERE token_hash = ?", (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
+            if row and user_repo.get_user(row["username"]):
+                username = row["username"]
+                session["username"] = username
     if not username:
         return False
 
@@ -623,10 +752,11 @@ def handle_connect():
         if is_invisible and player_name != username:
             continue
 
-        if player_name == game.mr_x and game.mr_x_last_known_location:
+        visible_mrx_location = game.mr_x_last_known_location if player_name == username else game.mr_x_public_location
+        if player_name == game.mr_x and visible_mrx_location:
             current_locations[player_name] = {
-                "lat": game.mr_x_last_known_location["lat"],
-                "lon": game.mr_x_last_known_location["lon"],
+                "lat": visible_mrx_location["lat"],
+                "lon": visible_mrx_location["lon"],
             }
         elif player.last_location and player_name != game.mr_x:
             current_locations[player_name] = {
@@ -665,6 +795,9 @@ def handle_disconnect():
     if not disconnecting_user:
         return
 
+    if game.players[disconnecting_user].sid != sid:
+        return
+
     if disconnecting_user != game.mr_x:
         leave_room(SEEKERS_CHAT_ROOM, sid=sid)
 
@@ -696,9 +829,18 @@ def handle_location_update(data):
     if lat is None or lon is None:
         return
 
+    publish_location(username, lat, lon, skip_sid=request.sid)
+
+
+def publish_location(username, lat, lon, skip_sid=None):
+    player = game.players.get(username)
+    if not player:
+        player = PlayerState(sid="")
+        game.players[username] = player
     player.last_location = {"lat": lat, "lon": lon}
 
     if username == game.mr_x:
+        game.mrx_disconnect_task_pending = False
         now = time.time()
         game.mr_x_last_known_location = {"lat": lat, "lon": lon}
         interval_seconds = game.update_interval_minutes * 60
@@ -716,6 +858,7 @@ def handle_location_update(data):
                 announce_previous_decoy = True
             game.mrx_last_update_was_decoy = False
 
+        game.mr_x_public_location = location_to_send.copy()
         socketio.emit(
             "location_update",
             {
@@ -735,7 +878,7 @@ def handle_location_update(data):
     socketio.emit(
         "location_update",
         {"username": username, "lat": lat, "lon": lon},
-        skip_sid=request.sid,
+        skip_sid=skip_sid,
     )
 
 
@@ -820,6 +963,8 @@ def handle_send_chat_message(data):
         {"username": username, "message": message_text},
         room=SEEKERS_CHAT_ROOM,
     )
+    socketio.start_background_task(send_native_push, f"Nachricht von {username}", message_text,
+                                   [name for name in game.players if name != username and name != game.mr_x])
 
 
 @socketio.on("mr_x_found")
@@ -841,6 +986,7 @@ def handle_mr_x_found(data):
             "mr_x": game.mr_x,
         },
     )
+    socketio.start_background_task(send_native_push, "Jagd beendet", f"Mr. X wurde von {finder} gefunden!", list(game.players))
     reset_game_state(notify_clients=False)
 
 
