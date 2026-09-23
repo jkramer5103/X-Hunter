@@ -328,7 +328,8 @@ def native_state():
         decoys=game.mrx_remaining_decoys if username == game.mr_x else None,
         invisibility=player.remaining_invisibility if player and username != game.mr_x else game.seeker_invisibility_uses,
         invisible_until=player.invisible_until if player and username != game.mr_x else None,
-        mr_x_real_location=game.mr_x_last_known_location if username == game.mr_x else None)
+        mr_x_real_location=game.mr_x_last_known_location if username == game.mr_x else None,
+        mr_x_public_is_decoy=game.mrx_last_update_was_decoy if username == game.mr_x else False)
 
 
 @app.post("/api/native/location")
@@ -871,6 +872,7 @@ def handle_connect(auth=None):
             "mrx_update_interval_minutes": game.update_interval_minutes,
             "mrx_last_broadcast_time": game.mr_x_last_broadcast_time,
             "mr_x_real_location": game.mr_x_last_known_location if username == game.mr_x else None,
+            "mr_x_public_is_decoy": game.mrx_last_update_was_decoy if username == game.mr_x else False,
         },
     )
     socketio.emit("player_joined", {"username": username}, skip_sid=sid)
@@ -976,6 +978,9 @@ def broadcast_mrx_location_if_due() -> bool:
         "previous_was_decoy": previous_was_decoy,
     })
     socketio.emit("mrx_update_timer", {"last_broadcast_time": now})
+    mr_x_player = game.players.get(game.mr_x)
+    if mr_x_player and mr_x_player.sid:
+        socketio.emit("mrx_decoy_status", {"mr_x_public_is_decoy": game.mrx_last_update_was_decoy}, room=mr_x_player.sid)
     return True
 
 
