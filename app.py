@@ -345,6 +345,17 @@ def native_location():
     return jsonify(ok=True)
 
 
+@app.post("/api/native/invisibility")
+def native_invisibility():
+    username = native_user()
+    if not username:
+        return jsonify(error="Nicht angemeldet"), 401
+    result, error = activate_invisibility_for(username)
+    if error:
+        return jsonify(error=error), 409
+    return jsonify(result)
+
+
 def native_admin() -> bool:
     username = native_user()
     return bool(username and (user_repo.get_user(username) or {}).get("is_admin"))
@@ -768,6 +779,8 @@ def manage_users():
 @socketio.on("connect")
 def handle_connect(auth=None):
     username = current_user()
+    if not username:
+        username = native_user()
     if not username and isinstance(auth, dict):
         token = auth.get("token", "")
         if isinstance(token, str):
@@ -961,37 +974,36 @@ def handle_set_decoy_location(data):
 @socketio.on("activate_invisibility")
 def handle_activate_invisibility():
     username = current_user()
-    if not username or not game.active or username == game.mr_x:
-        return
+    result, error = activate_invisibility_for(username, request.sid)
+    if error:
+        emit("error_message", {"message": error})
+    else:
+        emit("invisibility_activated", result)
 
+
+def activate_invisibility_for(username, skip_sid=None):
+    if not username or not game.active or username == game.mr_x:
+        return None, "Keine aktive Jagd für diesen Sucher"
     player = game.players.get(username)
     if not player:
-        return
-
+        return None, "Spieler ist nicht in der Jagd"
     if player.invisible_until and player.invisible_until > time.time():
-        emit("error_message", {"message": "Du bist bereits unsichtbar!"})
-        return
-
+        return None, "Du bist bereits unsichtbar!"
     if player.remaining_invisibility <= 0:
-        emit("error_message", {"message": "Keine Unsichtbarkeits-Nutzungen mehr verfügbar!"})
-        return
-
+        return None, "Keine Unsichtbarkeits-Nutzungen mehr verfügbar!"
     player.remaining_invisibility -= 1
     duration = game.seeker_invisibility_duration_seconds
     expiration = time.time() + duration
     player.invisible_until = expiration
 
-    emit(
-        "invisibility_activated",
-        {"duration": duration, "remaining_uses": player.remaining_invisibility},
-    )
-    socketio.emit("player_invisible", {"username": username}, skip_sid=request.sid)
+    socketio.emit("player_invisible", {"username": username}, skip_sid=skip_sid)
     socketio.start_background_task(
         target=make_visible_again_wrapper,
         username=username,
         expected_expiration=expiration,
         duration=duration,
     )
+    return {"duration": duration, "remaining_uses": player.remaining_invisibility}, None
 
 
 @socketio.on("send_chat_message")
