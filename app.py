@@ -318,9 +318,8 @@ def native_state():
         if member.invisible_until and member.invisible_until > time.time() and name != username:
             continue
         if name == game.mr_x:
-            visible = game.mr_x_last_known_location if name == username else game.mr_x_public_location
-            if visible:
-                locations[name] = visible
+            if game.mr_x_public_location:
+                locations[name] = game.mr_x_public_location
         elif member.last_location:
             locations[name] = member.last_location
     return jsonify(username=username, is_admin=bool(user_repo.get_user(username).get("is_admin")), active=game.active,
@@ -328,7 +327,8 @@ def native_state():
         interval=game.update_interval_minutes, last_broadcast=game.mr_x_last_broadcast_time,
         decoys=game.mrx_remaining_decoys if username == game.mr_x else None,
         invisibility=player.remaining_invisibility if player and username != game.mr_x else game.seeker_invisibility_uses,
-        invisible_until=player.invisible_until if player and username != game.mr_x else None)
+        invisible_until=player.invisible_until if player and username != game.mr_x else None,
+        mr_x_real_location=game.mr_x_last_known_location if username == game.mr_x else None)
 
 
 @app.post("/api/native/location")
@@ -845,11 +845,10 @@ def handle_connect(auth=None):
         if is_invisible and player_name != username:
             continue
 
-        visible_mrx_location = game.mr_x_last_known_location if player_name == username else game.mr_x_public_location
-        if player_name == game.mr_x and visible_mrx_location:
+        if player_name == game.mr_x and game.mr_x_public_location:
             current_locations[player_name] = {
-                "lat": visible_mrx_location["lat"],
-                "lon": visible_mrx_location["lon"],
+                "lat": game.mr_x_public_location["lat"],
+                "lon": game.mr_x_public_location["lon"],
             }
         elif player.last_location and player_name != game.mr_x:
             current_locations[player_name] = {
@@ -871,6 +870,7 @@ def handle_connect(auth=None):
             "invisible_until": player_state.invisible_until if username != game.mr_x else None,
             "mrx_update_interval_minutes": game.update_interval_minutes,
             "mrx_last_broadcast_time": game.mr_x_last_broadcast_time,
+            "mr_x_real_location": game.mr_x_last_known_location if username == game.mr_x else None,
         },
     )
     socketio.emit("player_joined", {"username": username}, skip_sid=sid)
