@@ -345,6 +345,54 @@ def native_location():
     return jsonify(ok=True)
 
 
+def native_admin() -> bool:
+    username = native_user()
+    return bool(username and (user_repo.get_user(username) or {}).get("is_admin"))
+
+
+@app.get("/api/native/admin/setup")
+def native_admin_setup():
+    if not native_admin():
+        return jsonify(error="Nur für Administratoren"), 403
+    return jsonify(users=list(user_repo.list_users()), interval=5,
+                   num_decoys=DEFAULT_DECOYS, num_invisibility=DEFAULT_INVISIBILITY_USES,
+                   invisibility_duration=DEFAULT_INVISIBILITY_DURATION_SECONDS)
+
+
+@app.post("/api/native/admin/start")
+def native_admin_start():
+    if not native_admin():
+        return jsonify(error="Nur für Administratoren"), 403
+    if game.active:
+        return jsonify(error="Ein Spiel läuft bereits"), 409
+    payload = request.get_json(silent=True) or {}
+    selected_mr_x = payload.get("mr_x")
+    users = user_repo.list_users()
+    if not isinstance(selected_mr_x, str) or selected_mr_x not in users:
+        return jsonify(error="Bitte einen gültigen Spieler als Mr. X wählen"), 400
+    try:
+        interval_minutes = int(payload.get("interval", 5))
+        num_decoys = int(payload.get("num_decoys", DEFAULT_DECOYS))
+        num_invisibility = int(payload.get("num_invisibility", DEFAULT_INVISIBILITY_USES))
+        invisibility_duration = int(payload.get("invisibility_duration", DEFAULT_INVISIBILITY_DURATION_SECONDS))
+        if interval_minutes <= 0 or num_decoys < 0 or num_invisibility < 0 or invisibility_duration <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify(error="Bitte gültige Spielwerte eingeben"), 400
+    begin_game(selected_mr_x, interval_minutes, num_decoys, num_invisibility, invisibility_duration, list(users))
+    return jsonify(ok=True)
+
+
+@app.post("/api/native/admin/end")
+def native_admin_end():
+    if not native_admin():
+        return jsonify(error="Nur für Administratoren"), 403
+    if not game.active:
+        return jsonify(error="Kein aktives Spiel"), 409
+    reset_game_state()
+    return jsonify(ok=True)
+
+
 def current_user() -> str | None:
     return session.get("username")
 
@@ -478,6 +526,12 @@ def start_game():
         flash("Bitte wähle einen gültigen Spieler als Mr. X aus.", "error")
         return redirect(url_for("index"))
 
+    begin_game(selected_mr_x, interval_minutes, num_decoys, num_invisibility, invisibility_duration, list(users))
+    flash(f"Spiel gestartet! {selected_mr_x} ist Mr. X.", "success")
+    return redirect(url_for("map_page"))
+
+
+def begin_game(selected_mr_x, interval_minutes, num_decoys, num_invisibility, invisibility_duration, users):
     game.active = True
     game.mr_x = selected_mr_x
     game.update_interval_minutes = interval_minutes
@@ -503,9 +557,7 @@ def start_game():
             "invisibility_duration": invisibility_duration,
         },
     )
-    socketio.start_background_task(send_native_push, "Die Jagd beginnt", "Ein neues Spiel wurde gestartet.", list(users))
-    flash(f"Spiel gestartet! {selected_mr_x} ist Mr. X.", "success")
-    return redirect(url_for("map_page"))
+    socketio.start_background_task(send_native_push, "Die Jagd beginnt", "Ein neues Spiel wurde gestartet.", users)
 
 
 @app.route("/setup", methods=["GET", "POST"])
