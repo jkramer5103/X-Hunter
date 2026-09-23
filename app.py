@@ -356,6 +356,28 @@ def native_invisibility():
     return jsonify(result)
 
 
+@app.post("/api/native/decoy")
+def native_decoy():
+    username = native_user()
+    if not username:
+        return jsonify(error="Nicht angemeldet"), 401
+    result, error = set_decoy_for(username, request.get_json(silent=True) or {})
+    if error:
+        return jsonify(error=error), 409
+    return jsonify(result)
+
+
+@app.post("/api/native/found")
+def native_found():
+    username = native_user()
+    if not username:
+        return jsonify(error="Nicht angemeldet"), 401
+    error = finish_found_for(username, (request.get_json(silent=True) or {}).get("finder"))
+    if error:
+        return jsonify(error=error), 409
+    return jsonify(ok=True)
+
+
 def native_admin() -> bool:
     username = native_user()
     return bool(username and (user_repo.get_user(username) or {}).get("is_admin"))
@@ -950,25 +972,27 @@ def publish_location(username, lat, lon, skip_sid=None):
 @socketio.on("set_decoy_location")
 def handle_set_decoy_location(data):
     username = current_user()
+    result, error = set_decoy_for(username, data or {})
+    if error:
+        emit("error_message", {"message": error})
+    else:
+        emit("decoy_set_confirmation", result)
+
+
+def set_decoy_for(username, data):
     if not username or not game.active or username != game.mr_x:
-        return
-
+        return None, "Nur Mr. X kann in einer aktiven Jagd Köder setzen"
     if game.mrx_remaining_decoys <= 0:
-        emit("error_message", {"message": "Keine Ablenkungsmanöver mehr verfügbar!"})
-        return
-
-    lat = data.get("lat")
-    lon = data.get("lon")
-    if lat is None or lon is None:
-        emit("error_message", {"message": "Ungültige Koordinaten für Ablenkungsmanöver."})
-        return
-
+        return None, "Keine Ablenkungsmanöver mehr verfügbar!"
+    try:
+        lat, lon = float(data["lat"]), float(data["lon"])
+        if not -90 <= lat <= 90 or not -180 <= lon <= 180:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        return None, "Ungültige Koordinaten für Ablenkungsmanöver."
     game.mrx_pending_decoy_location = {"lat": lat, "lon": lon}
     game.mrx_remaining_decoys -= 1
-    emit(
-        "decoy_set_confirmation",
-        {"lat": lat, "lon": lon, "remaining_decoys": game.mrx_remaining_decoys},
-    )
+    return {"lat": lat, "lon": lon, "remaining_decoys": game.mrx_remaining_decoys}, None
 
 
 @socketio.on("activate_invisibility")
@@ -1034,13 +1058,16 @@ def handle_send_chat_message(data):
 @socketio.on("mr_x_found")
 def handle_mr_x_found(data):
     username = current_user()
-    if not game.active or not username or username != game.mr_x:
-        return
+    error = finish_found_for(username, (data or {}).get("finder"))
+    if error:
+        emit("error_message", {"message": error})
 
-    finder = data.get("finder")
+
+def finish_found_for(username, finder):
+    if not game.active or not username or username != game.mr_x:
+        return "Nur Mr. X kann eine aktive Jagd beenden"
     if not finder or finder not in game.players:
-        emit("error_message", {"message": f"Ungültiger Finder '{finder}' ausgewählt."})
-        return
+        return f"Ungültiger Finder '{finder}' ausgewählt."
 
     socketio.emit(
         "game_over",
@@ -1052,6 +1079,7 @@ def handle_mr_x_found(data):
     )
     socketio.start_background_task(send_native_push, "Jagd beendet", f"Mr. X wurde von {finder} gefunden!", list(game.players))
     reset_game_state(notify_clients=False)
+    return None
 
 
 if __name__ == "__main__":
