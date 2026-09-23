@@ -193,6 +193,8 @@ class PlayerState:
 @dataclass
 class GameState:
     active: bool = False
+    round_id: int = 0
+    mrx_timer_started: bool = False
     mr_x: str | None = None
     update_interval_minutes: int = 5
     mr_x_last_broadcast_time: float = 0
@@ -209,6 +211,7 @@ class GameState:
 
     def reset(self) -> None:
         self.active = False
+        self.mrx_timer_started = False
         self.mr_x = None
         self.update_interval_minutes = 5
         self.mr_x_last_broadcast_time = 0
@@ -324,7 +327,8 @@ def native_state():
         mr_x=game.mr_x, players=list(game.players), locations=locations,
         interval=game.update_interval_minutes, last_broadcast=game.mr_x_last_broadcast_time,
         decoys=game.mrx_remaining_decoys if username == game.mr_x else None,
-        invisibility=player.remaining_invisibility if player and username != game.mr_x else game.seeker_invisibility_uses)
+        invisibility=player.remaining_invisibility if player and username != game.mr_x else game.seeker_invisibility_uses,
+        invisible_until=player.invisible_until if player and username != game.mr_x else None)
 
 
 @app.post("/api/native/location")
@@ -565,7 +569,9 @@ def start_game():
 
 
 def begin_game(selected_mr_x, interval_minutes, num_decoys, num_invisibility, invisibility_duration, users):
+    game.round_id += 1
     game.active = True
+    game.mrx_timer_started = False
     game.mr_x = selected_mr_x
     game.update_interval_minutes = interval_minutes
     game.mr_x_last_broadcast_time = 0
@@ -862,6 +868,7 @@ def handle_connect(auth=None):
             "seeker_remaining_invisibility": player_state.remaining_invisibility
             if username != game.mr_x
             else None,
+            "invisible_until": player_state.invisible_until if username != game.mr_x else None,
             "mrx_update_interval_minutes": game.update_interval_minutes,
             "mrx_last_broadcast_time": game.mr_x_last_broadcast_time,
         },
@@ -928,35 +935,9 @@ def publish_location(username, lat, lon, skip_sid=None):
 
     if username == game.mr_x:
         game.mrx_disconnect_task_pending = False
-        now = time.time()
         game.mr_x_last_known_location = {"lat": lat, "lon": lon}
-        interval_seconds = game.update_interval_minutes * 60
-        if now - game.mr_x_last_broadcast_time < interval_seconds:
-            return
-
-        announce_previous_decoy = False
-        if game.mrx_pending_decoy_location:
-            location_to_send = game.mrx_pending_decoy_location
-            game.mrx_pending_decoy_location = None
-            game.mrx_last_update_was_decoy = True
-        else:
-            location_to_send = game.mr_x_last_known_location
-            if game.mrx_last_update_was_decoy:
-                announce_previous_decoy = True
-            game.mrx_last_update_was_decoy = False
-
-        game.mr_x_public_location = location_to_send.copy()
-        socketio.emit(
-            "location_update",
-            {
-                "username": username,
-                "lat": location_to_send["lat"],
-                "lon": location_to_send["lon"],
-                "previous_was_decoy": announce_previous_decoy,
-            },
-        )
-        game.mr_x_last_broadcast_time = now
-        socketio.emit("mrx_update_timer", {"last_broadcast_time": now})
+        if broadcast_mrx_location_if_due():
+            ensure_mrx_signal_timer()
         return
 
     if player.invisible_until and player.invisible_until > time.time():
@@ -967,6 +948,49 @@ def publish_location(username, lat, lon, skip_sid=None):
         {"username": username, "lat": lat, "lon": lon},
         skip_sid=skip_sid,
     )
+
+
+def broadcast_mrx_location_if_due() -> bool:
+    if not game.active or not game.mr_x_last_known_location:
+        return False
+    now = time.time()
+    if game.mr_x_last_broadcast_time and now < game.mr_x_last_broadcast_time + game.update_interval_minutes * 60:
+        return False
+
+    previous_was_decoy = False
+    if game.mrx_pending_decoy_location:
+        location_to_send = game.mrx_pending_decoy_location
+        game.mrx_pending_decoy_location = None
+        game.mrx_last_update_was_decoy = True
+    else:
+        location_to_send = game.mr_x_last_known_location
+        previous_was_decoy = game.mrx_last_update_was_decoy
+        game.mrx_last_update_was_decoy = False
+
+    game.mr_x_public_location = location_to_send.copy()
+    game.mr_x_last_broadcast_time = now
+    socketio.emit("location_update", {
+        "username": game.mr_x,
+        "lat": location_to_send["lat"],
+        "lon": location_to_send["lon"],
+        "previous_was_decoy": previous_was_decoy,
+    })
+    socketio.emit("mrx_update_timer", {"last_broadcast_time": now})
+    return True
+
+
+def mrx_signal_timer(round_id: int) -> None:
+    while game.active and game.round_id == round_id:
+        due_at = game.mr_x_last_broadcast_time + game.update_interval_minutes * 60
+        socketio.sleep(max(0, due_at - time.time()))
+        if game.active and game.round_id == round_id:
+            broadcast_mrx_location_if_due()
+
+
+def ensure_mrx_signal_timer() -> None:
+    if not game.mrx_timer_started:
+        game.mrx_timer_started = True
+        socketio.start_background_task(mrx_signal_timer, game.round_id)
 
 
 @socketio.on("set_decoy_location")
@@ -1027,7 +1051,8 @@ def activate_invisibility_for(username, skip_sid=None):
         expected_expiration=expiration,
         duration=duration,
     )
-    return {"duration": duration, "remaining_uses": player.remaining_invisibility}, None
+    return {"duration": duration, "remaining_uses": player.remaining_invisibility,
+            "invisible_until": expiration}, None
 
 
 @socketio.on("send_chat_message")
